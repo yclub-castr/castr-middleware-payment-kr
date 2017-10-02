@@ -1,6 +1,8 @@
 # castr-middleware-payment-kr
 
 ## Debug 
+`npm install`
+
 `npm run-script dev`
 
 ## Important
