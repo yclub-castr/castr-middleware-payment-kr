@@ -1,15 +1,15 @@
 
 const MongoClient = require('mongodb');
-const config = require('./config');
-
-const url = config.db.url;
 
 module.exports = {
     connect: function (callback) {
-        MongoClient.connect(url, (err, db) => {
-            _db = db;
-            return callback(err);
-        });
+        MongoClient.connect(
+            'mongodb://' + process.env.DB_USER + ':' + process.env.DB_PW + '@ds123400.mlab.com:23400/' + process.env.DB_HOST,
+            (err, db) => {
+                _db = db;
+                return callback(err);
+            }
+        );
     },
 
     getDB: function () {

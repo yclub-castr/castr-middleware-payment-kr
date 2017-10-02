@@ -1,9 +1,11 @@
 const Iamport = require('iamport')
-const config = require('../config')
 
 class IamportService {
     constructor() {
-        this.iamport = new Iamport(config.iamport);
+        this.iamport = new Iamport({
+            impKey: process.env.IAMPORT_APIKEY,
+            impSecret: process.env.IAMPORT_SECRET
+        });
     }
 
     /**
@@ -115,7 +117,7 @@ class IamportService {
                 break;
             case 'paid':
                 // Fetch the transaction
-                this.iamport.payment.getByImpUid({'imp_uid':req.body['imp_uid']})
+                this.iamport.payment.getByImpUid({ 'imp_uid': req.body['imp_uid'] })
                     .then(result => {
                         // Insert to db
                         mongoDB.getDB().collection('transactions').updateOne(
@@ -137,7 +139,7 @@ class IamportService {
                 break;
             case 'failed':
                 // Fetch the transaction
-                this.iamport.payment.getByImpUid({'imp_uid':req.body['imp_uid']})
+                this.iamport.payment.getByImpUid({ 'imp_uid': req.body['imp_uid'] })
                     .then(result => {
                         console.log(result);
                         if (result.response.custom_data.fail_count === 3) {
