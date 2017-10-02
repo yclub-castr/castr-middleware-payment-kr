@@ -4,7 +4,7 @@
 `npm run-script dev`
 
 ## Important
-The official I'mport node.js SDK does not currently provide some functions and needs some tweak before they accept my pull request. Please make these changes in the installed **iamport** package files.
+The official I'mport node.js SDK does not currently provide some functions and needs some tweak before they accept my pull request. For the time being, please make these changes in the installed **iamport** package files.
 
 1. iamport/lib/resources/Subscribe_customer.js
   
