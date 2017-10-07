@@ -11,8 +11,10 @@ router.get('/', function (req, res) {
     res.send('It\'s alive!!!');
 });
 
-router.use('/iamport', iamport_router);
-router.use('/open-platform', op_router);
+if(process.env.LOCALE === 'ko_KR'){
+    router.use('/payment', iamport_router);
+    router.use('/open-platform', op_router);
+}
 
 router.route('/echo')
     .get(function (req, res) {
