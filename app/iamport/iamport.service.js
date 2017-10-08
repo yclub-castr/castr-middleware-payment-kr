@@ -12,11 +12,27 @@ const billing_plan_types = {
     "52_WEEK": 52
 }
 
+// GMAIL_SERVICE=Gmail
+// GMAIL_AUTH_TYPE=OAuth2
+// GMAIL_AUTH_USER=<gmail address used for the authentication, see below>
+
+// GMAIL_FROM_EMAIL=email@johnvincent.io
+// GMAIL_SUPPORT_EMAIL=support@johnvincent.io
+
+// GMAIL_AUTH_CLIENT_ID
+// GMAIL_AUTH_CLIENT_SECRET
+// GMAIL_AUTH_REFRESH_TOKEN
+// GMAIL_AUTH_ACCESS_TOKEN
+
 const transporter = nodemailer.createTransport({
-    "service": 'gmail',
+    "service": 'Gmail',
     "auth": {
+        "type": 'OAuth2',
         "user": process.env.FROM_EMAIL_ID,
-        "pass": process.env.FROM_EMAIL_PW
+        "clientId": process.env.GMAIL_CLIENT_ID,
+        "clientSecret": process.env.GMAIL_CLIENT_SECRET,
+        "refreshToken": process.env.GMAIL_REFRESH_TOKEN,
+        "accessToken": process.env.GMAIL_ACCESS_TOKEN
     }
 });
 
@@ -52,22 +68,20 @@ class IamportService {
         setTimeout(function () { this._checkScheduledPayments(); }, time_until);
     }
     _checkScheduledPayments() {
-        transporter.sendMail(mailOptions, function (mail_error, info) {
-            if (error) {
-                logger.error(error);
-            } else {
-                logger.debug('Email sent: ' + info.response);
-            }
-        });
+        transporter.sendMail(mailOptions)
+            .then(info => logger.debug('Email sent: ' + info.response))
+            .catch(mail_error => logger.error(mail_error))
         // Find all scheduled payments with pending flag for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
-                "pending": true
+                "pending": true,
+                "scheduled_date": { "$gte": new Date(2017, 10, 8) }
             },
             function (db_error, cursor) {
                 cursor.forEach(
                     // Iteration callback
                     function (document) {
+                        console.log(document);
                         // Make the payment
                     },
                     // End callback
