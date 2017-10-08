@@ -2,6 +2,7 @@
 
 const Iamport = require('iamport');
 const moment = require('moment');
+const nodemailer = require('nodemailer');
 const logger = require('tracer').console({ format: "{{message}}  - {{file}}:{{line}}" });
 const mongoDB = require('../db');
 
@@ -11,12 +12,73 @@ const billing_plan_types = {
     "52_WEEK": 52
 }
 
+const transporter = nodemailer.createTransport({
+    "service": 'gmail',
+    "auth": {
+        "user": process.env.FROM_EMAIL_ID,
+        "pass": process.env.FROM_EMAIL_PW
+    }
+});
+
+const mailOptions = {
+    "from": process.env.FROM_EMAIL_ID,
+    "to": process.env.TO_EMAIL_ID,
+    "subject": 'Payment Statement',
+    "text": `Date: ${new Date()}\nMessage: Testing...`
+}
+
 class IamportService {
     constructor() {
         this.iamport = new Iamport({
             impKey: process.env.IAMPORT_APIKEY,
             impSecret: process.env.IAMPORT_SECRET
         });
+        // Schdule payment-schedule check at next 6AM
+        this._checkScheduleAt6AM();
+    }
+
+    _checkScheduleAt6AM() {
+        let full_day = 24 * 60 * 60 * 1000;
+        let now = new Date();
+        let next_morning = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+            6, 0, 0, 0
+        );
+        // Calculate time until next 6AM
+        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
+        // Check for scheduled payments at next 6AM
+        setTimeout(function () { this._checkScheduledPayments(); }, time_until);
+    }
+    _checkScheduledPayments() {
+        transporter.sendMail(mailOptions, function (mail_error, info) {
+            if (error) {
+                logger.error(error);
+            } else {
+                logger.debug('Email sent: ' + info.response);
+            }
+        });
+        // Find all scheduled payments with pending flag for today and before
+        mongoDB.getDB().collection('payment-schedule').find(
+            {
+                "pending": true
+            },
+            function (db_error, cursor) {
+                cursor.forEach(
+                    // Iteration callback
+                    function (document) {
+                        // Make the payment
+                    },
+                    // End callback
+                    function (error) {
+                        // Do nothing
+                    }
+                )
+            }
+        );
+        // Schdule payment-schedule check at next 6AM
+        this._checkScheduleAt6AM();
     }
 
     getPaymentMethods(req, res) {
@@ -67,12 +129,6 @@ class IamportService {
         )
     }
 
-    /**
-     * Creates a payment method for the user. The 'customer_uid' must be a uniquely identifiable id for each payment method.
-     * 
-     * @param {*} req 
-     * @param {*} res 
-     */
     createPaymentMethod(req, res) {
         let business_id = req.params.business_id;
         let last_4_digits = req.body['card_number'].split('-')[3];
@@ -250,7 +306,6 @@ class IamportService {
                     .then(iamport_result => {
                         logger.debug(iamport_result);
                         // Schedule next payment
-                        // self.schedule(res, iamport_result);
                     }).catch(iamport_error => {
                         logger.error(iamport_error);
                         res.send({
@@ -330,23 +385,34 @@ class IamportService {
             });
     }
 
+
+
     pay(req, res) {
         this.iamport.subscribe.again({
-            "customer_uid": req.params.customer_uid,
-            "merchant_uid": req.body['merchant_uid'],
+            "customer_uid": customer_uid,
+            "merchant_uid": `${business_id}_ch${charge_num}`,
             "amount": req.body['amount'],
             "vat": req.body['vat'],
-            "name": req.body['name']
+            "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
+            "custom_data": JSON.stringify({
+                "customer_uid": customer_uid,
+                "business_id": business_id,
+                "billing_plan": billing_plan,
+                "charge_num": charge_num
+            })
         })
             .then(iamport_result => {
-                console.log(iamport_result);
-                res.send(iamport_result);
-            })
-            .catch(iamport_error => {
-                console.log(iamport_error);
+                logger.debug(iamport_result);
+                // Schedule next payment
+                // self.schedule(res, iamport_result);
+            }).catch(iamport_error => {
+                logger.error(iamport_error);
                 res.send({
-                    "error_code": iamport_error.code,
-                    "message": iamport_error.message
+                    "payment": {
+                        "error_code": iamport_error.code,
+                        "message": iamport_error.message
+                    },
+                    "schedule": null
                 });
             });
     }
