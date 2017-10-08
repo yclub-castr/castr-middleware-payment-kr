@@ -22,7 +22,7 @@ const transporter = nodemailer.createTransport({
 
 const mailOptions = {
     "from": process.env.FROM_EMAIL_ID,
-    "to": process.env.TO_EMAIL_ID,
+    "to": process.env.TO_EMAIL_IDS,
     "subject": 'Payment Statement',
     "text": `Date: ${new Date()}\nMessage: Testing...`
 }
