@@ -119,6 +119,27 @@ class IamportService {
             });
     }
 
+    setAsDefault(req, res) {
+        // Unset the current default method   
+        mongoDB.getDB().collection('payments').updateOne(
+            { 
+                "business_id": req.params.business_id,
+                "default_method": true
+             },
+            { "$set": { "default_method": false } },
+            // Set the provided method as the new default
+            function (unset_db_error, unset_write_result) {
+                mongoDB.getDB().collection('payments').updateOne(
+                    { "customer_uid": req.params.customer_uid },
+                    { "$set": { "default_method": true } },
+                    function(set_db_error, set_write_result){
+                        res.send('ok');
+                    }
+                )
+            }
+        )
+    }
+
     subscribe(req, res) {
         try {
             let self = this;

@@ -27,6 +27,12 @@ router.route('/:business_id/payment-method')
         iamportService.deletePaymentMethod(req, res);
     });
 
+/**
+ * Set the payment method as the default for this business
+ */
+router.post('/:business_id/payment-method/:customer_uid', function(req, res){
+    iamportService.setAsDefault(req,res);
+})
 
 /** 
  * 
