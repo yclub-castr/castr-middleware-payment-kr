@@ -1,3 +1,5 @@
+'use strict';
+
 const Iamport = require('iamport');
 const moment = require('moment');
 const logger = require('tracer').console({ format: "{{message}}  - {{file}}:{{line}}" });
@@ -19,32 +21,47 @@ class IamportService {
 
     getPaymentMethods(req, res) {
         let self = this;
+        // Find all payment methods under the business
         mongoDB.getDB().collection('payments').find(
             { "business_id": req.params.business_id },
             function (db_error, cursor) {
                 let promises = [];
                 let methods = [];
                 cursor.forEach(
-                    // iteration callback
+                    // Iteration callback
                     function (document) {
+                        // Create a promise for each I'mport request
                         promises.push(self.iamport.subscribe_customer.get({ "customer_uid": document.customer_uid })
                             .then(iamport_result => {
                                 logger.debug(iamport_result);
                                 methods.push(iamport_result);
                             }).catch(iamport_error => {
-                                logger.debug(iamport_error);
-                                methods.push(iamport_error);
+                                logger.error(iamport_error);
+                                methods.push({
+                                    "customer_uid": document.customer_uid,
+                                    "error_code": iamport_error.code,
+                                    "message": iamport_error.message
+                                })
                             })
                         );
                     },
-                    // end callback
+                    // End callback
                     function (error) {
                         Promise.all(promises)
                             .then(function () {
-                                logger.debug(methods);
-                                res.send(methods);
+                                res.send({
+                                    "sucecss": true,
+                                    "data": methods
+                                });
                             })
-                            .catch(err => { })
+                            .catch(err => {
+                                logger.error(err);
+                                res.send({
+                                    "success": false,
+                                    "error_code": err.code,
+                                    "message": err.message
+                                });
+                            })
                     })
             }
         )
@@ -59,6 +76,17 @@ class IamportService {
     createPaymentMethod(req, res) {
         let business_id = req.params.business_id;
         let last_4_digits = req.body['card_number'].split('-')[3];
+        // Check for I'mport vulnerability
+        if (last_4_digits.length !== 4) {
+            let msg = `The last 4 digits are not 4 digits long (${last_4_digits})`;
+            logger.error(msg);
+            res.send({
+                "error_code": 'castr_payment_error',
+                "message": msg
+            });
+            return;
+        }
+        // Request I'mport service
         this.iamport.subscribe_customer.create({
             // Required
             "customer_uid": `${business_id}_${last_4_digits}`,
@@ -84,22 +112,30 @@ class IamportService {
                     {
                         "$setOnInsert": {
                             "business_id": business_id,
-                            "created_time": Date.now()
+                            "created_time": new Date()
                         },
                         "$set": {
                             "customer_uid": iamport_result.customer_uid,
                             "default_method": false,
-                            "updated_time": Date.now()
+                            "updated_time": new Date()
                         }
                     },
                     { upsert: true }
                 );
-                res.send(iamport_result);
-            }).catch(iamport_error => {
-                logger.debug(iamport_error);
                 res.send({
-                    "error_code": iamport_error.code,
-                    "message": iamport_error.message
+                    "success": true,
+                    "message": `New payment method (${iamport_result.customer_uid}) has been created.`,
+                    "data": iamport_result
+                });
+            }).catch(iamport_error => {
+                logger.error(iamport_error);
+                res.send({
+                    "success": false,
+                    "message": 'Something went wrong with I\'mport while registering new payment method ',
+                    "error": {
+                        "code": iamport_error.code,
+                        "message": iamport_error.message
+                    }
                 });
             });
     }
@@ -109,12 +145,20 @@ class IamportService {
             .then(iamport_result => {
                 logger.debug(iamport_result);
                 mongoDB.getDB().collection('payments').deleteOne({ "customer_uid": iamport_result.customer_uid });
-                res.send(iamport_result);
-            }).catch(iamport_error => {
-                logger.debug(iamport_error);
                 res.send({
-                    "error_code": iamport_error.code,
-                    "message": iamport_error.message
+                    "success": true,
+                    "message": `Payment method (${iamport_result.customer_uid}) has been removed.`,
+                    "data": iamport_result
+                });
+            }).catch(iamport_error => {
+                logger.error(iamport_error);
+                res.send({
+                    "success": false,
+                    "message": 'Something went wrong with I\'mport while removing the payment method',
+                    "error": {
+                        "code": iamport_error.code,
+                        "message": iamport_error.message
+                    }
                 });
             });
     }
@@ -122,18 +166,32 @@ class IamportService {
     setAsDefault(req, res) {
         // Unset the current default method   
         mongoDB.getDB().collection('payments').updateOne(
-            { 
+            {
                 "business_id": req.params.business_id,
                 "default_method": true
-             },
+            },
             { "$set": { "default_method": false } },
             // Set the provided method as the new default
             function (unset_db_error, unset_write_result) {
                 mongoDB.getDB().collection('payments').updateOne(
                     { "customer_uid": req.params.customer_uid },
                     { "$set": { "default_method": true } },
-                    function(set_db_error, set_write_result){
-                        res.send('ok');
+                    function (set_db_error, set_write_result) {
+                        // If no payment method found return error
+                        if (set_write_result.matchedCount === 0) {
+                            let msg = `No payment method was found for the given 'customer_uid' (${req.params.customer_uid})`;
+                            logger.error(msg);
+                            res.send({
+                                "error_code": 'castr_payment_error',
+                                "message": msg
+                            });
+                            return;
+                        }
+                        res.send({
+                            "success": true,
+                            "message": `Payment method (${req.params.customer_uid}) has been set as default.`,
+                            "data": { "customer_uid": req.params.customer_uid }
+                        });
                     }
                 )
             }
@@ -141,64 +199,69 @@ class IamportService {
     }
 
     subscribe(req, res) {
-        try {
-            let self = this;
-            let business_id = req.params.business_id;
-            let billing_plan = req.body['billing_plan'];
-            let charge_num = req.body['charge_num'];
-            // Validate billing plan
-            if (!billing_plan_types.hasOwnProperty(billing_plan)) {
-                throw new Error('billing_plan not supported, must provide either: ' + Object.keys(billing_plan_types));
-            }
-            let start = moment().utc();
-            let end = moment().utc().add(billing_plan_types[billing_plan], 'week').subtract(1, 'day');
-            // Get 'customer_uid' for the default payment method
-            mongoDB.getDB().collection('payments').find(
-                {
-                    "business_id": business_id,
-                    "default_method": true
-                },
-                function (db_error, cursor) {
-                    // Count found payment methods
-                    cursor.count(function (err, count) {
-                        if (count === 0) {
-                            throw new Error(`Could not find a default payment method for the business (${business_id}).`);
-                        }
-                        // Process initial payment
-                        self.iamport.subscribe.again({
-                            "customer_uid": req.params.customer_uid,
-                            "merchant_uid": `${business_id}_ch${charge_num}`,
-                            "amount": req.body['amount'],
-                            "vat": req.body['vat'],
-                            "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
-                            "custom_data": JSON.stringify({
-                                "customer_uid": req.params.customer_uid,
-                                "business_id": business_id,
-                                "billing_plan": billing_plan,
-                                "charge_num": charge_num
-                            })
-                        })
-                            .then(iamport_result => {
-                                logger.debug(iamport_result);
-                                // Schedule next payment
-                                self.schedule(res, iamport_result);
-                            }).catch(iamport_error => {
-                                logger.error(iamport_error);
-                                res.send({
-                                    "payment": {
-                                        "error_code": iamport_error.code,
-                                        "message": iamport_error.message
-                                    },
-                                    "schedule": null
-                                });
-                            });
-                    })
-                }
-            )
-        } catch (error) {
-            console.log(error);
-            res.send(error);
+        let self = this;
+        let business_id = req.params.business_id;
+        let billing_plan = req.body['billing_plan'];
+        let charge_num = req.body['charge_num'];
+        // Validate billing plan
+        if (!billing_plan_types.hasOwnProperty(billing_plan)) {
+            let msg = 'billing_plan not supported, must provide either: ' + Object.keys(billing_plan_types);
+            logger.error(msg);
+            res.send({
+                "error_code": 'castr_payment_error',
+                "message": msg
+            });
+            return;
         }
+        let start = moment().utc();
+        let end = moment().utc().add(billing_plan_types[billing_plan], 'week').subtract(1, 'day');
+        // Get 'customer_uid' for the default payment method
+        mongoDB.getDB().collection('payments').findOne(
+            {
+                "business_id": business_id,
+                "default_method": true
+            },
+            function (db_error, default_method) {
+                if (default_method === null) {
+                    let msg = `Could not find a default payment method for the business (${business_id}).`;
+                    logger.error(msg);
+                    res.send({
+                        "error_code": 'castr_payment_error',
+                        "message": msg
+                    });
+                    return;
+                }
+                let customer_uid = default_method.customer_uid;
+                // Process initial payment
+                self.iamport.subscribe.again({
+                    "customer_uid": customer_uid,
+                    "merchant_uid": `${business_id}_ch${charge_num}`,
+                    "amount": req.body['amount'],
+                    "vat": req.body['vat'],
+                    "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
+                    "custom_data": JSON.stringify({
+                        "customer_uid": customer_uid,
+                        "business_id": business_id,
+                        "billing_plan": billing_plan,
+                        "charge_num": charge_num
+                    })
+                })
+                    .then(iamport_result => {
+                        logger.debug(iamport_result);
+                        // Schedule next payment
+                        self.schedule(res, iamport_result);
+                    }).catch(iamport_error => {
+                        logger.error(iamport_error);
+                        res.send({
+                            "payment": {
+                                "error_code": iamport_error.code,
+                                "message": iamport_error.message
+                            },
+                            "schedule": null
+                        });
+                    });
+            }
+        )
     }
 
     schedule(res, iamport_result) {
