@@ -22,7 +22,7 @@ class IamportService {
     getPaymentMethods(req, res) {
         let self = this;
         // Find all payment methods under the business
-        mongoDB.getDB().collection('payments').find(
+        mongoDB.getDB().collection('payment-methods').find(
             { "business_id": req.params.business_id },
             function (db_error, cursor) {
                 let promises = [];
@@ -104,7 +104,7 @@ class IamportService {
             .then(iamport_result => {
                 logger.debug(iamport_result);
                 // Update this payment method to the business account in castrDB
-                mongoDB.getDB().collection('payments').updateOne(
+                mongoDB.getDB().collection('payment-methods').updateOne(
                     {
                         "business_id": business_id,
                         "customer_uid": iamport_result.customer_uid
@@ -144,7 +144,7 @@ class IamportService {
         this.iamport.subscribe_customer.delete({ "customer_uid": req.body.customer_uid })
             .then(iamport_result => {
                 logger.debug(iamport_result);
-                mongoDB.getDB().collection('payments').deleteOne({ "customer_uid": iamport_result.customer_uid });
+                mongoDB.getDB().collection('payment-methods').deleteOne({ "customer_uid": iamport_result.customer_uid });
                 res.send({
                     "success": true,
                     "message": `Payment method (${iamport_result.customer_uid}) has been removed.`,
@@ -165,7 +165,7 @@ class IamportService {
 
     setAsDefault(req, res) {
         // Unset the current default method   
-        mongoDB.getDB().collection('payments').updateOne(
+        mongoDB.getDB().collection('payment-methods').updateOne(
             {
                 "business_id": req.params.business_id,
                 "default_method": true
@@ -173,11 +173,11 @@ class IamportService {
             { "$set": { "default_method": false } },
             // Set the provided method as the new default
             function (unset_db_error, unset_write_result) {
-                mongoDB.getDB().collection('payments').updateOne(
+                mongoDB.getDB().collection('payment-methods').updateOne(
                     { "customer_uid": req.params.customer_uid },
                     { "$set": { "default_method": true } },
                     function (set_db_error, set_write_result) {
-                        // If no payment method found return error
+                        // If no payment method found, return error
                         if (set_write_result.matchedCount === 0) {
                             let msg = `No payment method was found for the given 'customer_uid' (${req.params.customer_uid})`;
                             logger.error(msg);
@@ -215,13 +215,14 @@ class IamportService {
         }
         let start = moment().utc();
         let end = moment().utc().add(billing_plan_types[billing_plan], 'week').subtract(1, 'day');
-        // Get 'customer_uid' for the default payment method
-        mongoDB.getDB().collection('payments').findOne(
+        // Fetch the default payment method
+        mongoDB.getDB().collection('payment-methods').findOne(
             {
                 "business_id": business_id,
                 "default_method": true
             },
             function (db_error, default_method) {
+                // If no default method was found, return error
                 if (default_method === null) {
                     let msg = `Could not find a default payment method for the business (${business_id}).`;
                     logger.error(msg);
@@ -249,7 +250,7 @@ class IamportService {
                     .then(iamport_result => {
                         logger.debug(iamport_result);
                         // Schedule next payment
-                        self.schedule(res, iamport_result);
+                        // self.schedule(res, iamport_result);
                     }).catch(iamport_error => {
                         logger.error(iamport_error);
                         res.send({
