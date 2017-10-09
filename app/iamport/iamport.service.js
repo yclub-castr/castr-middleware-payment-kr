@@ -337,6 +337,59 @@ class IamportService {
         });
     }
 
+    /**
+     * Processes a one-time payment using the default payment method set for the business ('business_id').
+     * @param {*} business_id 
+     * @param {*} data
+     * @param {*} callback 
+     */
+    pay(business_id, data, callback) {
+        let self = this;
+        // Fetch the default payment method
+        mongoDB.getDB().collection('payment-methods').findOne(
+            {
+                "business_id": business_id,
+                "default_method": true
+            },
+            function (db_error, default_method) {
+                // If no default method was found, return error
+                if (default_method === null) {
+                    let msg = `Could not find a default payment method for the business (${business_id}).`;
+                    logger.error(msg);
+                    res.send({
+                        "success": false,
+                        "error": {
+                            "code": 'castr_payment_error'
+                        },
+                        "message": msg
+                    });
+                    return;
+                }
+                // Request I'mport for payment
+                self.iamport.subscribe.again({
+                    "merchant_uid": `${business_id}_ch${data.charge_num}`,
+                    "customer_uid": default_method.customer_uid,
+                    "name": data.name,
+                    "amount": data.amount,
+                    "vat": data.vat,
+                    // "custom_data": JSON.stringify({
+                    //     "customer_uid": data.customer_uid,
+                    //     "business_id": data.business_id,
+                    //     "billing_plan": data.billing_plan,
+                    //     "charge_num": data.charge_num
+                    // })
+                })
+                    .then(iamport_result => {
+                        logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
+                        callback(null, iamport_result);
+                    }).catch(iamport_error => {
+                        logger.error(iamport_error);
+                        callback(iamport_error, null);
+                    });
+            }
+        )
+    }
+
     schedule(res, iamport_result) {
         let custom_data = JSON.parse(iamport_result.custom_data);
         let customer_uid = custom_data['customer_uid'];
@@ -402,145 +455,153 @@ class IamportService {
             });
     }
 
-
-    /**
-     * Processes a one-time payment using the default payment method set for the business ('business_id').
-     * @param {*} business_id 
-     * @param {*} data
-     * @param {*} callback 
-     */
-    pay(business_id, data, callback) {
+    /* getHistory(req, res) {
         let self = this;
-        // Fetch the default payment method
-        mongoDB.getDB().collection('payment-methods').findOne(
-            {
-                "business_id": business_id,
-                "default_method": true
-            },
-            function (db_error, default_method) {
-                // If no default method was found, return error
-                if (default_method === null) {
-                    let msg = `Could not find a default payment method for the business (${business_id}).`;
-                    logger.error(msg);
-                    res.send({
-                        "success": false,
-                        "error": {
-                            "code": 'castr_payment_error'
-                        },
-                        "message": msg
-                    });
-                    return;
-                }
-                // Request I'mport for payment
-                self.iamport.subscribe.again({
-                    "merchant_uid": `${business_id}_ch${data.charge_num}`,
-                    "customer_uid": default_method.customer_uid,
-                    "name": data.name,
-                    "amount": data.amount,
-                    "vat": data.vat,
-                    // "custom_data": JSON.stringify({
-                    //     "customer_uid": data.customer_uid,
-                    //     "business_id": data.business_id,
-                    //     "billing_plan": data.billing_plan,
-                    //     "charge_num": data.charge_num
-                    // })
-                })
-                    .then(iamport_result => {
-                        logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
-                        callback(null, iamport_result);
-                    }).catch(iamport_error => {
-                        logger.error(iamport_error);
-                        callback(iamport_error, null);
-                    });
+        new Promise()
+        let recursiveFetch = function (customer_uid, data, page) {
+            self.iamport.subscribe_customer.getPayments({
+                "customer_uid": customer_uid,
+                "page": page
+            })
+                .then(iamport_result => {
+                    logger.debug(iamport_result);
+                    if (iamport_result.next !== 0) {
+                        recursiveFetch(customer_uid, data.concat(iamport_result.list), iamport_result.next);
+                    } else {
+                        data.concat(iamport_result.list);
+                    }
+                }).catch(iamport_error => {
+                    logger.error(iamport_error);
+                });
+        }
+        // Find all payment methods under the business
+        mongoDB.getDB().collection('payment-methods').find(
+            { "business_id": req.params.business_id },
+            function (db_error, cursor) {
+                let promises = [];
+                let methods = [];
+                cursor.forEach(
+                    // Iteration callback
+                    function (document) {
+                        // Create a promise for each I'mport request
+
+
+
+
+                         promises.push(self.iamport.subscribe_customer.get({ "customer_uid": document.customer_uid })
+                            .then(iamport_result => {
+                                logger.debug(`Successfully fetched payment method (${iamport_result.customer_uid}) from I'mport.`);
+                                iamport_result.default_method = document.default_method;
+                                methods.push(iamport_result);
+                            }).catch(iamport_error => {
+                                logger.error(iamport_error);
+                                methods.push({
+                                    "error": {
+                                        "code": iamport_error.code,
+                                        "message": iamport_error.message
+                                    }
+                                })
+                            })
+                        ); 
+                    },
+                    // End callback
+                    function (error) {
+                        Promise.all(promises)
+                            .then(function () {
+                                res.send({
+                                    "sucecss": true,
+                                    "data": methods
+                                });
+                            })
+                            .catch(err => {
+                                logger.error(err);
+                                res.send({
+                                    "success": false,
+                                    "message": 'Something went wrong during the end callback of cursor iteration',
+                                    "error": {
+                                        "code": err.code,
+                                        "message": err.message
+                                    }
+                                });
+                            })
+                    })
             }
         )
-    }
-
-    getHistory(req, res, data, page) {
-        this.iamport.subscribe_customer.getPayments({
-            "customer_uid": req.params.customer_uid,
-            "page": page
-        })
-            .then(iamport_result => {
-                console.log(iamport_result);
-                if (iamport_result['next'] !== 0) {
-                    this.getHistory(req, res, data.concat(iamport_result.list), iamport_result['next']);
-                } else {
-                    res.send(data.concat(iamport_result.list));
-                }
-            }).catch(iamport_error => {
-                console.log(iamport_error);
-                res.send({
-                    "error_code": iamport_error.code,
-                    "message": iamport_error.message
-                });
-            });
-    }
+    } */
 
     paymentHook(req, res) {
-        switch (req.body['status']) {
-            case 'ready':
-                // This shouldn't happen
-                break;
-            case 'paid':
-                // Fetch the transaction
-                this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
-                    .then(iamport_result => {
-                        // Insert to db
-                        mongoDB.getDB().collection('transactions').updateOne(
-                            {
-                                "imp_uid": iamport_result.response.imp_uid,
-                                "merchant_uid": iamport_result.response.merchant_uid
-                            },
-                            iamport_result.response,
-                            { "upsert": true }
-                        );
-                    }).catch(iamport_errorerr => {
-                        logger.error(iamport_error);
-                        const iamport_error = ({
-                            "error_code": iamport_error.code,
-                            "message": iamport_error.message
-                        });
-                        res.send(error);
-                    });
-                break;
-            case 'failed':
-                // Fetch the transaction
-                this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
-                    .then(iamport_result => {
-                        console.log(iamport_result);
-                        if (iamport_result.response.custom_data.fail_count === 3) {
-                            // If failed 3rd time, pause service and retry when different payment method is provided
-                        }
-                        // Increment failure count
-                        iamport_result.response.custom_data.fail_count += 1
-                        // Insert to db
-                        mongoDB.getDB().collection('transactions').updateOne(
-                            {
-                                "imp_uid": iamport_result.response.imp_uid,
-                                "merchant_uid": iamport_result.response.merchant_uid
-                            },
-                            iamport_result.response,
-                            { "upsert": true }
-                        );
-                        // Retry
-
-                        res.send(iamport_result);
-                    }).catch(iamport_error => {
-                        logger.error({
-                            "error_code": iamport_error.code,
-                            "message": iamport_error.message
-                        });
-                        res.send(iamport_error);
-                    });
-                break;
-            case 'cancelled':
-                // Update database as refunded
-                break;
-            default:
-                logger.log(req.body);
-                res.send(req.body);
-        }
+        let email = {
+            "from": process.env.FROM_EMAIL_ID,
+            "to": process.env.TO_EMAIL_IDS,
+            "subject": 'Payment Receipt',
+            "text": JSON.stringify(req.body)
+        };
+        transporter.sendMail(email)
+            .then(info => logger.debug('Email sent: ' + info.response))
+            .catch(mail_error => logger.error(mail_error))
+        /*  switch (req.body['status']) {
+             case 'ready':
+                 // This shouldn't happen
+                 break;
+             case 'paid':
+                 // Fetch the transaction
+                 this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
+                     .then(iamport_result => {
+                         // Insert to db
+                         mongoDB.getDB().collection('transactions').updateOne(
+                             {
+                                 "imp_uid": iamport_result.response.imp_uid,
+                                 "merchant_uid": iamport_result.response.merchant_uid
+                             },
+                             iamport_result.response,
+                             { "upsert": true }
+                         );
+                     }).catch(iamport_errorerr => {
+                         logger.error(iamport_error);
+                         const iamport_error = ({
+                             "error_code": iamport_error.code,
+                             "message": iamport_error.message
+                         });
+                         res.send(error);
+                     });
+                 break;
+             case 'failed':
+                 // Fetch the transaction
+                 this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
+                     .then(iamport_result => {
+                         console.log(iamport_result);
+                         if (iamport_result.response.custom_data.fail_count === 3) {
+                             // If failed 3rd time, pause service and retry when different payment method is provided
+                         }
+                         // Increment failure count
+                         iamport_result.response.custom_data.fail_count += 1
+                         // Insert to db
+                         mongoDB.getDB().collection('transactions').updateOne(
+                             {
+                                 "imp_uid": iamport_result.response.imp_uid,
+                                 "merchant_uid": iamport_result.response.merchant_uid
+                             },
+                             iamport_result.response,
+                             { "upsert": true }
+                         );
+                         // Retry
+ 
+                         res.send(iamport_result);
+                     }).catch(iamport_error => {
+                         logger.error({
+                             "error_code": iamport_error.code,
+                             "message": iamport_error.message
+                         });
+                         res.send(iamport_error);
+                     });
+                 break;
+             case 'cancelled':
+                 // Update database as refunded
+                 break;
+             default:
+                 logger.log(req.body);
+                 res.send(req.body);
+         } */
     }
 }
 
