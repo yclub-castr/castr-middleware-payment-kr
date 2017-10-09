@@ -318,6 +318,7 @@ class IamportService {
         let end = moment().utc().add(billing_plan_types[billing_plan], 'week').subtract(1, 'day');
         let data = {
             "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
+            "billing_plan": billing_plan,
             "charge_num": req.body.charge_num,
             "amount": req.body.amount,
             "vat": req.body.vat
@@ -376,8 +377,8 @@ class IamportService {
                     "amount": data.amount,
                     "vat": data.vat,
                     "custom_data": JSON.stringify({
-                        "customer_uid": data.customer_uid,
-                        "business_id": data.business_id,
+                        "business_id": business_id,
+                        "customer_uid": default_method.customer_uid,
                         "billing_plan": data.billing_plan,
                         "charge_num": data.charge_num
                     })
@@ -552,7 +553,7 @@ class IamportService {
                     .then(iamport_result => {
                         let custom_data = JSON.parse(iamport_result.custom_data);
                         let time_paid = new Date(iamport_result.paid_at * 1000);
-                        // Insert to db
+                        // Insert payment result to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
                                 "business_id": custom_data.business_id,
@@ -570,7 +571,7 @@ class IamportService {
                             }
                         );
                         // Calculate next pay date
-                        let date_paid = new Date(
+                        let next_pay_date = new Date(
                             time_paid.getFullYear(),
                             time_paid.getMonth(),
                             time_paid.getDate() + billing_plan_types[custom_data.billing_plan] * 7,
@@ -579,9 +580,10 @@ class IamportService {
                         mongoDB.getDB().collection('payment-schedule').insertOne(
                             {
                                 "business_id": custom_data.business_id,
-                                "schedule": date_paid,
+                                "schedule": next_pay_date,
                                 "charge_num": parseInt(custom_data.charge_num) + 1,
                                 "amount": iamport_result.amount,
+                                "billing_plan": custom_data.billing_plan,
                                 "pending": true
                             }
                         );
