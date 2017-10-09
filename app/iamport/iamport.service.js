@@ -530,78 +530,67 @@ class IamportService {
     } */
 
     paymentHook(req, res) {
-        let email = {
-            "from": process.env.FROM_EMAIL_ID,
-            "to": process.env.TO_EMAIL_IDS,
-            "subject": 'Payment Receipt',
-            "text": JSON.stringify(req.body)
-        };
-        transporter.sendMail(email)
-            .then(info => logger.debug('Email sent: ' + info.response))
-            .catch(mail_error => logger.error(mail_error))
-        /*  switch (req.body['status']) {
-             case 'ready':
-                 // This shouldn't happen
-                 break;
-             case 'paid':
-                 // Fetch the transaction
-                 this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
-                     .then(iamport_result => {
-                         // Insert to db
-                         mongoDB.getDB().collection('transactions').updateOne(
-                             {
-                                 "imp_uid": iamport_result.response.imp_uid,
-                                 "merchant_uid": iamport_result.response.merchant_uid
-                             },
-                             iamport_result.response,
-                             { "upsert": true }
-                         );
-                     }).catch(iamport_errorerr => {
-                         logger.error(iamport_error);
-                         const iamport_error = ({
-                             "error_code": iamport_error.code,
-                             "message": iamport_error.message
-                         });
-                         res.send(error);
-                     });
-                 break;
-             case 'failed':
-                 // Fetch the transaction
-                 this.iamport.payment.getByImpUid({ "imp_uid": req.body['imp_uid'] })
-                     .then(iamport_result => {
-                         console.log(iamport_result);
-                         if (iamport_result.response.custom_data.fail_count === 3) {
-                             // If failed 3rd time, pause service and retry when different payment method is provided
-                         }
-                         // Increment failure count
-                         iamport_result.response.custom_data.fail_count += 1
-                         // Insert to db
-                         mongoDB.getDB().collection('transactions').updateOne(
-                             {
-                                 "imp_uid": iamport_result.response.imp_uid,
-                                 "merchant_uid": iamport_result.response.merchant_uid
-                             },
-                             iamport_result.response,
-                             { "upsert": true }
-                         );
-                         // Retry
- 
-                         res.send(iamport_result);
-                     }).catch(iamport_error => {
-                         logger.error({
-                             "error_code": iamport_error.code,
-                             "message": iamport_error.message
-                         });
-                         res.send(iamport_error);
-                     });
-                 break;
-             case 'cancelled':
-                 // Update database as refunded
-                 break;
-             default:
-                 logger.log(req.body);
-                 res.send(req.body);
-         } */
+        switch (req.body.status) {
+            case 'ready':
+                // This shouldn't happen, will it?
+                let email = {
+                    "from": process.env.FROM_EMAIL_ID,
+                    "to": process.env.TO_EMAIL_IDS,
+                    "subject": 'Payment Ready',
+                    "text": JSON.stringify(req.body)
+                };
+                transporter.sendMail(email)
+                    .then(info => logger.debug('Email sent: ' + info.response))
+                    .catch(mail_error => logger.error(mail_error));
+                break;
+            case 'paid':
+                // Fetch the transaction
+                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
+                    .then(iamport_result => {
+                        let res = iamport_result.response;
+                        // Insert to db
+                        mongoDB.getDB().collection('payment-transactions').insertOne(
+                            {
+                                "imp_uid": res.imp_uid,
+                                "merchant_uid": res.merchant_uid,
+                                "name": res.name,
+                                "amount": res.amount,
+                                "currency": res.currency,
+                                "pay_method": res.pay_method,
+                                "card_name": res.card_name,
+                                "status": 'paid',
+                                "receipt_url": res.receipt_url,
+                                "time_paid": new Date(res.paid_at),
+                            }
+                        );
+                    }).catch(iamport_error => {
+                        logger.error(iamport_error);
+                    });
+                break;
+            case 'failed':
+                logger.error('I\'mport payment has failed for some reason.');
+                // Fetch the transaction
+                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
+                    .then(iamport_result => {
+                        let email = {
+                            "from": process.env.FROM_EMAIL_ID,
+                            "to": process.env.TO_EMAIL_IDS,
+                            "subject": 'Payment Failed',
+                            "text": JSON.stringify(iamport_result)
+                        };
+                        transporter.sendMail(email)
+                            .then(info => logger.debug('Email sent: ' + info.response))
+                            .catch(mail_error => logger.error(mail_error));
+                    }).catch(iamport_error => {
+                        logger.error(iamport_error);
+                    });
+                break;
+            case 'cancelled':
+                // Update database as refunded
+                break;
+            default:
+                logger.debug(req.body);
+        }
     }
 }
 
