@@ -10,19 +10,7 @@ const billing_plan_types = {
     "4_WEEK": 4,
     "26_WEEK": 26,
     "52_WEEK": 52
-}
-
-// GMAIL_SERVICE=Gmail
-// GMAIL_AUTH_TYPE=OAuth2
-// GMAIL_AUTH_USER=<gmail address used for the authentication, see below>
-
-// GMAIL_FROM_EMAIL=email@johnvincent.io
-// GMAIL_SUPPORT_EMAIL=support@johnvincent.io
-
-// GMAIL_AUTH_CLIENT_ID
-// GMAIL_AUTH_CLIENT_SECRET
-// GMAIL_AUTH_REFRESH_TOKEN
-// GMAIL_AUTH_ACCESS_TOKEN
+};
 
 const transporter = nodemailer.createTransport({
     "service": 'Gmail',
@@ -41,7 +29,7 @@ const mailOptions = {
     "to": process.env.TO_EMAIL_IDS,
     "subject": 'Payment Statement',
     "text": `Date: ${new Date()}\nMessage: Testing...`
-}
+};
 
 class IamportService {
     constructor() {
@@ -49,50 +37,6 @@ class IamportService {
             impKey: process.env.IAMPORT_APIKEY,
             impSecret: process.env.IAMPORT_SECRET
         });
-        // Schdule payment-schedule check at next 6AM
-        this._checkScheduleAt6AM();
-    }
-
-    _checkScheduleAt6AM() {
-        let full_day = 24 * 60 * 60 * 1000;
-        let now = new Date();
-        let next_morning = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate() + 1,
-            6, 0, 0, 0
-        );
-        // Calculate time until next 6AM
-        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
-        // Check for scheduled payments at next 6AM
-        setTimeout(function () { this._checkScheduledPayments(); }, time_until);
-    }
-    _checkScheduledPayments() {
-        transporter.sendMail(mailOptions)
-            .then(info => logger.debug('Email sent: ' + info.response))
-            .catch(mail_error => logger.error(mail_error))
-        // Find all scheduled payments with pending flag for today and before
-        mongoDB.getDB().collection('payment-schedule').find(
-            {
-                "pending": true,
-                "scheduled_date": { "$gte": new Date(2017, 10, 8) }
-            },
-            function (db_error, cursor) {
-                cursor.forEach(
-                    // Iteration callback
-                    function (document) {
-                        console.log(document);
-                        // Make the payment
-                    },
-                    // End callback
-                    function (error) {
-                        // Do nothing
-                    }
-                )
-            }
-        );
-        // Schdule payment-schedule check at next 6AM
-        this._checkScheduleAt6AM();
     }
 
     getPaymentMethods(req, res) {
@@ -516,6 +460,51 @@ class IamportService {
                 logger.log(req.body);
                 res.send(req.body);
         }
+    }
+
+    _checkScheduleAt6AM() {
+        let self = this;
+        console.log('Waiting for next 6AM');
+        let full_day = 24 * 60 * 60 * 1000;
+        let now = new Date();
+        let next_morning = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+            6, 0, 0, 0
+        );
+        // Calculate time until next 6AM
+        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
+        // Check for scheduled payments at next 6AM
+        setTimeout(function () { self._checkScheduledPayments(); }, time_until);
+    }
+    _checkScheduledPayments() {
+        transporter.sendMail(mailOptions)
+            .then(info => logger.debug('Email sent: ' + info.response))
+            .catch(mail_error => logger.error(mail_error))
+        // Find all scheduled payments with pending flag for today and before
+        let now = new Date();
+        mongoDB.getDB().collection('payment-schedule').find(
+            {
+                "pending": true,
+                "scheduled_date": { "$lte": new Date(now.getFullYear(), now.getMonth(), now.getDate()) }
+            },
+            function (db_error, cursor) {
+                cursor.forEach(
+                    // Iteration callback
+                    function (document) {
+                        console.log(document.scheduled_date);
+                        // Make the payment
+                    },
+                    // End callback
+                    function (error) {
+                        // Do nothing
+                    }
+                )
+            }
+        );
+        // Schdule payment-schedule check at next 6AM
+        this._checkScheduleAt6AM();
     }
 }
 
