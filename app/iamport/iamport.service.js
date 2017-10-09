@@ -533,34 +533,39 @@ class IamportService {
         switch (req.body.status) {
             case 'ready':
                 // This shouldn't happen, will it?
-                let email = {
-                    "from": process.env.FROM_EMAIL_ID,
-                    "to": process.env.TO_EMAIL_IDS,
-                    "subject": 'Payment Ready',
-                    "text": JSON.stringify(req.body)
-                };
-                transporter.sendMail(email)
-                    .then(info => logger.debug('Email sent: ' + info.response))
-                    .catch(mail_error => logger.error(mail_error));
+                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
+                    .then(iamport_result => {
+                        let email = {
+                            "from": process.env.FROM_EMAIL_ID,
+                            "to": process.env.TO_EMAIL_IDS,
+                            "subject": 'Payment Ready',
+                            "text": JSON.stringify(iamport_result)
+                        };
+                        transporter.sendMail(email)
+                            .then(info => logger.debug('Email sent: ' + info.response))
+                            .catch(mail_error => logger.error(mail_error));
+                    }).catch(iamport_error => {
+                        logger.error(iamport_error);
+                    });
                 break;
             case 'paid':
                 // Fetch the transaction
                 this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
                     .then(iamport_result => {
-                        let res = iamport_result.response;
+                        let response = iamport_result.response;
                         // Insert to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
-                                "imp_uid": res.imp_uid,
-                                "merchant_uid": res.merchant_uid,
-                                "name": res.name,
-                                "amount": res.amount,
-                                "currency": res.currency,
-                                "pay_method": res.pay_method,
-                                "card_name": res.card_name,
+                                "imp_uid": response.imp_uid,
+                                "merchant_uid": response.merchant_uid,
+                                "name": response.name,
+                                "amount": response.amount,
+                                "currency": response.currency,
+                                "pay_method": response.pay_method,
+                                "card_name": response.card_name,
                                 "status": 'paid',
-                                "receipt_url": res.receipt_url,
-                                "time_paid": new Date(res.paid_at),
+                                "receipt_url": response.receipt_url,
+                                "time_paid": new Date(response.paid_at),
                             }
                         );
                     }).catch(iamport_error => {
