@@ -556,20 +556,19 @@ class IamportService {
                         transporter.sendMail(email)
                             .then(info => logger.debug('Email sent: ' + info.response))
                             .catch(mail_error => logger.error(mail_error));
-                        let response = iamport_result.response;
                         // Insert to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
-                                "imp_uid": response.imp_uid,
-                                "merchant_uid": response.merchant_uid,
-                                "name": response.name,
-                                "amount": response.amount,
-                                "currency": response.currency,
-                                "pay_method": response.pay_method,
-                                "card_name": response.card_name,
+                                "imp_uid": iamport_result.imp_uid,
+                                "merchant_uid": iamport_result.merchant_uid,
+                                "name": iamport_result.name,
+                                "amount": iamport_result.amount,
+                                "currency": iamport_result.currency,
+                                "pay_method": iamport_result.pay_method,
+                                "card_name": iamport_result.card_name,
                                 "status": 'paid',
-                                "receipt_url": response.receipt_url,
-                                "time_paid": new Date(response.paid_at)
+                                "receipt_url": iamport_result.receipt_url,
+                                "time_paid": new Date(iamport_result.paid_at)
                             }
                         );
                     }).catch(iamport_error => {
