@@ -107,7 +107,8 @@ class IamportService {
                         // Create a promise for each I'mport request
                         promises.push(self.iamport.subscribe_customer.get({ "customer_uid": document.customer_uid })
                             .then(iamport_result => {
-                                logger.debug(`Successfully fetched payment method (${customer_uid}) from I'mport.`);
+                                logger.debug(`Successfully fetched payment method (${iamport_result.customer_uid}) from I'mport.`);
+                                iamport_result.default_method = document.default_method;
                                 methods.push(iamport_result);
                             }).catch(iamport_error => {
                                 logger.error(iamport_error);
