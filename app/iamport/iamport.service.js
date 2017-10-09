@@ -533,6 +533,18 @@ class IamportService {
         switch (req.body.status) {
             case 'ready':
                 // This shouldn't happen, will it?
+                let email = {
+                    "from": process.env.FROM_EMAIL_ID,
+                    "to": process.env.TO_EMAIL_IDS,
+                    "subject": 'Payment Ready',
+                    "text": JSON.stringify(req.body)
+                };
+                transporter.sendMail(email)
+                    .then(info => logger.debug('Email sent: ' + info.response))
+                    .catch(mail_error => logger.error(mail_error));
+                break;
+            case 'paid':
+                // Fetch the transaction
                 this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
                     .then(iamport_result => {
                         let email = {
@@ -544,14 +556,6 @@ class IamportService {
                         transporter.sendMail(email)
                             .then(info => logger.debug('Email sent: ' + info.response))
                             .catch(mail_error => logger.error(mail_error));
-                    }).catch(iamport_error => {
-                        logger.error(iamport_error);
-                    });
-                break;
-            case 'paid':
-                // Fetch the transaction
-                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
-                    .then(iamport_result => {
                         let response = iamport_result.response;
                         // Insert to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
@@ -565,7 +569,7 @@ class IamportService {
                                 "card_name": response.card_name,
                                 "status": 'paid',
                                 "receipt_url": response.receipt_url,
-                                "time_paid": new Date(response.paid_at),
+                                "time_paid": new Date(response.paid_at)
                             }
                         );
                     }).catch(iamport_error => {
