@@ -3,8 +3,11 @@
 const Iamport = require('iamport');
 const moment = require('moment');
 const nodemailer = require('nodemailer');
-const logger = require('tracer').console({ format: "{{message}}  - {{file}}:{{line}}" });
 const mongoDB = require('../db');
+const logger = require('tracer').console({
+    format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
+    dateformat: "mmm. d | HH:MM:ss.L"
+});
 
 const billing_plan_types = {
     "4_WEEK": 4,
@@ -44,7 +47,7 @@ class IamportService {
      */
     _checkScheduleAt6AM() {
         let self = this;
-        console.log('Waiting for next 6AM');
+        logger.debug('Payment schedule watcher initiated');
         let full_day = 24 * 60 * 60 * 1000;
         let now = new Date();
         let next_morning = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 6, 0, 0, 0);
@@ -372,12 +375,12 @@ class IamportService {
                     "name": data.name,
                     "amount": data.amount,
                     "vat": data.vat,
-                    // "custom_data": JSON.stringify({
-                    //     "customer_uid": data.customer_uid,
-                    //     "business_id": data.business_id,
-                    //     "billing_plan": data.billing_plan,
-                    //     "charge_num": data.charge_num
-                    // })
+                    "custom_data": JSON.stringify({
+                        "customer_uid": data.customer_uid,
+                        "business_id": data.business_id,
+                        "billing_plan": data.billing_plan,
+                        "charge_num": data.charge_num
+                    })
                 })
                     .then(iamport_result => {
                         logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
@@ -547,28 +550,39 @@ class IamportService {
                 // Fetch the transaction
                 this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
                     .then(iamport_result => {
-                        let email = {
-                            "from": process.env.FROM_EMAIL_ID,
-                            "to": process.env.TO_EMAIL_IDS,
-                            "subject": 'Payment Ready',
-                            "text": JSON.stringify(iamport_result)
-                        };
-                        transporter.sendMail(email)
-                            .then(info => logger.debug('Email sent: ' + info.response))
-                            .catch(mail_error => logger.error(mail_error));
+                        let custom_data = JSON.parse(iamport_result.custom_data);
+                        let time_paid = new Date(iamport_result.paid_at * 1000);
                         // Insert to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
+                                "business_id": custom_data.business_id,
                                 "imp_uid": iamport_result.imp_uid,
                                 "merchant_uid": iamport_result.merchant_uid,
                                 "name": iamport_result.name,
                                 "amount": iamport_result.amount,
                                 "currency": iamport_result.currency,
+                                "customer_uid": custom_data.customer_uid,
                                 "pay_method": iamport_result.pay_method,
                                 "card_name": iamport_result.card_name,
                                 "status": 'paid',
                                 "receipt_url": iamport_result.receipt_url,
-                                "time_paid": new Date(iamport_result.paid_at)
+                                "time_paid": time_paid
+                            }
+                        );
+                        // Calculate next pay date
+                        let date_paid = new Date(
+                            time_paid.getFullYear(),
+                            time_paid.getMonth(),
+                            time_paid.getDate() + billing_plan_types[custom_data.billing_plan] * 7,
+                            0, 0, 0, 0);
+                        // Insert to payment-schedule collection
+                        mongoDB.getDB().collection('payment-schedule').insertOne(
+                            {
+                                "business_id": custom_data.business_id,
+                                "schedule": date_paid,
+                                "charge_num": parseInt(custom_data.charge_num) + 1,
+                                "amount": iamport_result.amount,
+                                "pending": true
                             }
                         );
                     }).catch(iamport_error => {
@@ -592,6 +606,7 @@ class IamportService {
                     }).catch(iamport_error => {
                         logger.error(iamport_error);
                     });
+                // Disable service
                 break;
             case 'cancelled':
                 // Update database as refunded
