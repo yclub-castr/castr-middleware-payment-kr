@@ -39,6 +39,58 @@ class IamportService {
         });
     }
 
+    /**
+     * Triggers checking payment schedules at 6AM everyday.
+     */
+    _checkScheduleAt6AM() {
+        let self = this;
+        console.log('Waiting for next 6AM');
+        let full_day = 24 * 60 * 60 * 1000;
+        let now = new Date();
+        let next_morning = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+            6, 0, 0, 0
+        );
+        // Calculate time until next 6AM
+        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
+        // Check for scheduled payments at next 6AM
+        setTimeout(function () { self._checkScheduledPayments(); }, time_until);
+    }
+
+    /**
+     * Checks the payment schedules and process them.
+     */
+    _checkScheduledPayments() {
+        transporter.sendMail(mailOptions)
+            .then(info => logger.debug('Email sent: ' + info.response))
+            .catch(mail_error => logger.error(mail_error))
+        // Find all scheduled payments with pending flag for today and before
+        let now = new Date();
+        mongoDB.getDB().collection('payment-schedule').find(
+            {
+                "pending": true,
+                "scheduled_date": { "$lte": new Date(now.getFullYear(), now.getMonth(), now.getDate()) }
+            },
+            function (db_error, cursor) {
+                cursor.forEach(
+                    // Iteration callback
+                    function (document) {
+                        console.log(document.scheduled_date);
+                        // Make the payment
+                    },
+                    // End callback
+                    function (error) {
+                        // Do nothing
+                    }
+                )
+            }
+        );
+        // Schdule payment-schedule check at next 6AM
+        this._checkScheduleAt6AM();
+    }
+
     getPaymentMethods(req, res) {
         let self = this;
         // Find all payment methods under the business
@@ -460,51 +512,6 @@ class IamportService {
                 logger.log(req.body);
                 res.send(req.body);
         }
-    }
-
-    _checkScheduleAt6AM() {
-        let self = this;
-        console.log('Waiting for next 6AM');
-        let full_day = 24 * 60 * 60 * 1000;
-        let now = new Date();
-        let next_morning = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate() + 1,
-            6, 0, 0, 0
-        );
-        // Calculate time until next 6AM
-        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
-        // Check for scheduled payments at next 6AM
-        setTimeout(function () { self._checkScheduledPayments(); }, time_until);
-    }
-    _checkScheduledPayments() {
-        transporter.sendMail(mailOptions)
-            .then(info => logger.debug('Email sent: ' + info.response))
-            .catch(mail_error => logger.error(mail_error))
-        // Find all scheduled payments with pending flag for today and before
-        let now = new Date();
-        mongoDB.getDB().collection('payment-schedule').find(
-            {
-                "pending": true,
-                "scheduled_date": { "$lte": new Date(now.getFullYear(), now.getMonth(), now.getDate()) }
-            },
-            function (db_error, cursor) {
-                cursor.forEach(
-                    // Iteration callback
-                    function (document) {
-                        console.log(document.scheduled_date);
-                        // Make the payment
-                    },
-                    // End callback
-                    function (error) {
-                        // Do nothing
-                    }
-                )
-            }
-        );
-        // Schdule payment-schedule check at next 6AM
-        this._checkScheduleAt6AM();
     }
 }
 
