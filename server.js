@@ -7,6 +7,10 @@ const mongoDB = require('./app/db')
 const bodyParser = require('body-parser');
 const routes = require('./app/routes');
 const iamportService = require('./app/iamport/iamport.service');
+const logger = require('tracer').console({
+    format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
+    dateformat: "mmm. d | HH:MM:ss.L"
+});
 
 const app = express()
 const port = process.env.PORT;
@@ -21,6 +25,6 @@ mongoDB.connect(function (err) {
     iamportService._checkScheduleAt6AM();
 
     app.listen(port, () => {
-        console.log('we are live on ' + port);
+        logger.debug('we are live on ' + port);
     });
 });
