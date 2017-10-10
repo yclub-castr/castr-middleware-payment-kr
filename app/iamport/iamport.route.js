@@ -1,14 +1,16 @@
+// app/iamport/iamport.route.js
+
+'use strict';
+
 const express = require('express');
 const iamportService = require('./iamport.service');
 
 const router = express.Router();
 
-// 'host/payment'
-
 router.get('/:business_id', function (req, res) {
     // Uses 'customer_uid' to retrieve the payment method
     iamportService.getPaymentMethods(req, res);
-})
+});
 
 /**
  * This route is used to manage payment methods. Each POST (with unique `customer_uid`) will create ONE payment method. 
