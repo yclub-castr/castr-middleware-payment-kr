@@ -79,8 +79,8 @@ class IamportService {
                     // Iteration callback
                     function (document) {
                         let data = {
+                            "merchant_uid": document.merchant_uid,
                             "billing_plan": document.billing_plan,
-                            "charge_num": document.charge_num,
                             "amount": document.amount,
                             "vat": document.vat
                         };
