@@ -28,10 +28,10 @@ router.route('/:business_id/payment-method')
     });
 
 /**
- * Set the payment method as the default for this business
+ * Set the payment method as the default for this business.
  */
-router.post('/:business_id/payment-method/:customer_uid', function(req, res){
-    iamportService.setAsDefault(req,res);
+router.post('/:business_id/payment-method/:customer_uid', function (req, res) {
+    iamportService.setAsDefault(req, res);
 })
 
 /** 
@@ -42,16 +42,11 @@ router.post('/:business_id/subscribe', function (req, res) {
     iamportService.subscribe(req, res);
 });
 
-router.post('/:business_id/unsubscribe', function (req, res) {
-    // Cancel all scheduled payments for the provided `customer_uid`
-    iamportService.unsubscribe(req, res);
-});
-
 /*
  * Use the business_id (formerly restaurant_id) for the `merchant_uid`.
  * This will retrieve all the transaction history for a specific `merchant_uid` (which is mapped to a specific business).
 */
-router.get('/:customer_uid/history', function (req, res) {
+router.get('/:business_id/history', function (req, res) {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
     iamportService.getHistory(req, res, [], 1);
 })
