@@ -46,14 +46,15 @@ class IamportService {
     _checkScheduledPayments() {
         let self = this;
         logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('ddd, MMM DD, YYYY')}.`);
-        // Find all scheduled payments with pending flag for today and before
+        // Find all scheduled payments with PENDING status for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
-                "pending": true,
+                "status": "PENDING",
                 "schedule": { "$lte": moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate() }
             },
             function (db_error, cursor) {
                 let successful_payments = [];
+                let failed_payments = [];
                 let promises = [];
                 cursor.forEach(
                     // Iteration callback
@@ -67,12 +68,15 @@ class IamportService {
                         };
                         // Make the payment
                         promises.push(self.pay(document.business_id, data)
-                            .then(function (payment_result) {
+                            .then(payment_result => {
                                 successful_payments.push(payment_result.merchant_uid);
-                                logger.debug(`Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${document.business_id}).`);
+                                logger.debug(`Scheduled payment (${merchant_uid}) of [${payment_result.amount} ${payment_result.currency}] was successfully charged to the business (${document.business_id}).`);
                             })
-                            .catch(function (payment_error) {
+                            .catch(payment_error => {
+                                failed_payments.push(payment_error);
+                                payment_error.message = `Something went wrong with I'mport while charging scheduled payment (${merchant_uid}).`;
                                 logger.error(payment_error);
+                                return;
                             })
                         );
                     },
@@ -80,17 +84,33 @@ class IamportService {
                     function (error) {
                         Promise.all(promises)
                             .then(function () {
-                                // Update the successful scheduled payments' pending flag to false
+                                // Update the successful scheduled payments' status to PROCESSED
                                 mongoDB.getDB().collection('payment-schedule').updateMany(
                                     { "merchant_uid": { "$in": successful_payments } },
-                                    { "$set": { "pending": false } },
+                                    { "$set": { "status": "PROCESSED" } },
                                     function (db_error, write_result) {
-                                        if (db_error) { logger.error(db_error) };
-                                        logger.debug(`(${write_result.modifiedCount}/${promises.length}) scheduled payments were successful.`)
+                                        if (db_error) {
+                                            logger.error(db_error);
+                                            return;
+                                        };
+                                        logger.debug(`(${write_result.modifiedCount}/${promises.length}) scheduled payments were successful.`);
+                                    }
+                                );
+                                // Update the failed scheduled payments' status flag to FAILED
+                                mongoDB.getDB().collection('payment-schedule').updateMany(
+                                    { "merchant_uid": { "$in": failed_payments } },
+                                    { "$set": { "status": "FAILED" } },
+                                    function (db_error, write_result) {
+                                        if (db_error) {
+                                            logger.error(db_error);
+                                            return;
+                                        };
+                                        logger.debug(`(${write_result.modifiedCount}/${promises.length}) scheduled payments failed.`);
                                     }
                                 );
                             })
                             .catch(err => {
+                                // This shouldn't happen
                                 logger.error(err);
                             });
                     }
@@ -118,19 +138,23 @@ class IamportService {
                     // Iteration callback
                     function (document) {
                         // Create a promise for each I'mport request
-                        promises.push(self.iamport.subscribe_customer.get({ "customer_uid": document.customer_uid })
+                        let params = { "customer_uid": document.customer_uid };
+                        promises.push(self.iamport.subscribe_customer.get(params)
                             .then(iamport_result => {
                                 logger.debug(`Successfully fetched payment method (${iamport_result.customer_uid}) from I'mport.`);
                                 iamport_result.default_method = document.default_method;
                                 methods.push(iamport_result);
                             }).catch(iamport_error => {
-                                logger.error(iamport_error);
-                                methods.push({
+                                let error = {
+                                    "message": `Failed to fetch payment method (${iamport_result.customer_uid}) from I'mport.`,
+                                    "params": params,
                                     "error": {
                                         "code": iamport_error.code,
                                         "message": iamport_error.message
                                     }
-                                })
+                                };
+                                logger.error(error);
+                                methods.push(error)
                             })
                         );
                     },
@@ -145,15 +169,17 @@ class IamportService {
                                 });
                             })
                             .catch(err => {
-                                logger.error(err);
-                                res.send({
-                                    "success": false,
+                                // Should not happen
+                                let error = {
                                     "message": 'Something went wrong during the end callback of cursor iteration',
                                     "error": {
                                         "code": err.code,
                                         "message": err.message
                                     }
-                                });
+                                };
+                                logger.error(err);
+                                error.success = false;
+                                res.send();
                             })
                     })
             }
@@ -182,9 +208,10 @@ class IamportService {
             return;
         }
         // Request I'mport service
+        let customer_uid = `${business_id}_${last_4_digits}`;
         this.iamport.subscribe_customer.create({
             // Required
-            "customer_uid": `${business_id}_${last_4_digits}`,
+            "customer_uid": customer_uid,
             "card_number": req.body.card_number,
             "expiry": req.body.expiry,
             "birth": req.body.birth,
@@ -223,15 +250,20 @@ class IamportService {
                     "data": iamport_result
                 });
             }).catch(iamport_error => {
-                logger.error(iamport_error);
-                res.send({
-                    "success": false,
+                let error = {
                     "message": 'Something went wrong with I\'mport while registering new payment method.',
+                    "params": {
+                        "business_id": business_id,
+                        "customer_uid": customer_uid
+                    },
                     "error": {
                         "code": iamport_error.code,
                         "message": iamport_error.message
                     }
-                });
+                };
+                logger.error(error);
+                error.success = false;
+                res.send(error);
             });
     }
 
@@ -241,7 +273,8 @@ class IamportService {
      * @param {*} res 
      */
     deletePaymentMethod(req, res) {
-        this.iamport.subscribe_customer.delete({ "customer_uid": req.body.customer_uid })
+        let params = { "customer_uid": req.body.customer_uid };
+        this.iamport.subscribe_customer.delete(params)
             .then(iamport_result => {
                 let msg = `Payment method (${iamport_result.customer_uid}) has been removed.`
                 logger.debug(msg);
@@ -252,15 +285,17 @@ class IamportService {
                     "data": iamport_result
                 });
             }).catch(iamport_error => {
-                logger.error(iamport_error);
-                res.send({
-                    "success": false,
+                let error = {
                     "message": 'Something went wrong with I\'mport while removing the payment method.',
+                    "params": params,
                     "error": {
                         "code": iamport_error.code,
                         "message": iamport_error.message
                     }
-                });
+                };
+                logger.error(error);
+                error.success = false;
+                res.send(error);
             });
     }
 
@@ -296,6 +331,7 @@ class IamportService {
                             });
                             return;
                         }
+                        // TODO: If successfully set, see if there is any missed payments
                         res.send({
                             "success": true,
                             "message": `Payment method (${req.params.customer_uid}) has been set as default.`,
@@ -329,8 +365,9 @@ class IamportService {
         }
         let business_id = req.params.business_id;
         let charge_num = req.body.charge_num || 0;
+        let merchant_uid = `${business_id}_ch${charge_num}`;
         let data = {
-            "merchant_uid": `${business_id}_ch${charge_num}`,
+            "merchant_uid": merchant_uid,
             "billing_plan": billing_plan,
             "pay_date": moment().toDate(),
             "amount": req.body.amount,
@@ -339,21 +376,19 @@ class IamportService {
         // Process initial payment
         this.pay(business_id, data)
             .then(function (payment_result) {
+                let msg = `Initial payment (${merchant_uid}) of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${req.params.business_id}).`;
+                logger.debug(msg);
                 res.send({
                     "success": true,
-                    "message": `Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${req.params.business_id}).`,
+                    "message": msg,
                     "data": payment_result
                 });
             })
             .catch(function (payment_error) {
-                res.send({
-                    "success": false,
-                    "message": 'Something went wrong with I\'mport while charging the initial payment.',
-                    "error": {
-                        "error_code": payment_error.code,
-                        "message": payment_error.message
-                    }
-                });
+                payment_error.message = `Something went wrong with I'mport while charging the initial payment (${merchant_uid}).`;
+                logger.error(payment_error);
+                payment_error.success = false;
+                res.send(payment_error);
                 return;
             });
     }
@@ -382,8 +417,7 @@ class IamportService {
                     }
                     let start = moment(data.pay_date).tz(timezone);
                     let end = moment(start).add(billing_plan_types[data.billing_plan], 'week').subtract(1, 'day');
-                    // Request I'mport for payment
-                    self.iamport.subscribe.again({
+                    let params = {
                         "merchant_uid": data.merchant_uid,
                         "customer_uid": default_method.customer_uid,
                         "name": `[${business_id}] Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
@@ -396,13 +430,21 @@ class IamportService {
                             "pay_date": data.pay_date,
                             "vat": data.vat
                         })
-                    })
+                    };
+                    // Request I'mport for payment
+                    self.iamport.subscribe.again(params)
                         .then(iamport_result => {
-                            logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
                             resolve(iamport_result);
                         }).catch(iamport_error => {
-                            logger.error(iamport_error);
-                            reject(iamport_error);
+                            params.custom_data = JSON.parse(params.custom_data);
+                            let error = {
+                                "params": params,
+                                "error": {
+                                    "error_code": iamport_error.code,
+                                    "message": iamport_error.message
+                                }
+                            };
+                            reject(error);
                         });
                 }
             )
@@ -456,8 +498,10 @@ class IamportService {
                     .catch(mail_error => logger.error(mail_error));
                 break;
             case 'paid':
+                logger.debug(`I'mport payment ${req.body.merchant_uid} has been processed.`);
                 // Fetch the transaction
-                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
+                let params = { "imp_uid": req.body.imp_uid };
+                this.iamport.payment.getByImpUid(params)
                     .then(iamport_result => {
                         let custom_data = JSON.parse(iamport_result.custom_data);
                         let pay_date = custom_data.pay_date;
@@ -497,17 +541,27 @@ class IamportService {
                                 "amount": iamport_result.amount,
                                 "vat": custom_data.vat,
                                 "billing_plan": custom_data.billing_plan,
-                                "pending": true
+                                "status": "PENDING"
                             }
                         );
-                    }).catch(iamport_error => {
-                        logger.error(iamport_error);
+                    })
+                    .catch(iamport_error => {
+                        let error = {
+                            "message": 'Look up by \'imp_uid\' failed.',
+                            "params": params,
+                            "error": {
+                                "error_code": iamport_error.code,
+                                "message": iamport_error.message
+                            }
+                        }
+                        logger.error(error);
                     });
                 break;
             case 'failed':
-                logger.error('I\'mport payment has failed for some reason.');
+                logger.error(`I'mport payment ${req.body.merchant_uid} has failed for some reason.`);
                 // Fetch the transaction
-                this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
+                let params = { "imp_uid": req.body.imp_uid };
+                this.iamport.payment.getByImpUid(params)
                     .then(iamport_result => {
                         let email = {
                             "from": process.env.FROM_EMAIL_ID,
@@ -519,9 +573,17 @@ class IamportService {
                             .then(info => logger.debug('Email sent: ' + info.response))
                             .catch(mail_error => logger.error(mail_error));
                     }).catch(iamport_error => {
-                        logger.error(iamport_error);
+                        let error = {
+                            "message": 'Look up by \'imp_uid\' failed.',
+                            "params": params,
+                            "error": {
+                                "error_code": iamport_error.code,
+                                "message": iamport_error.message
+                            }
+                        }
+                        logger.error(error);
                     });
-                // TODO: Disable service
+                // TODO: Disable castr service until new payment method is provided
                 break;
             case 'cancelled':
                 // Update database as refunded
