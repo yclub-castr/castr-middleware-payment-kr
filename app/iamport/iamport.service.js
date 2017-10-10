@@ -484,7 +484,7 @@ class IamportService {
 
     paymentHook(req, res) {
         switch (req.body.status) {
-            case 'ready':
+            case 'ready': {
                 // This shouldn't happen, will it?
                 // Send email just in case!
                 let email = {
@@ -497,7 +497,8 @@ class IamportService {
                     .then(info => logger.debug('Email sent: ' + info.response))
                     .catch(mail_error => logger.error(mail_error));
                 break;
-            case 'paid':
+            }
+            case 'paid': {
                 logger.debug(`I'mport payment ${req.body.merchant_uid} has been processed.`);
                 // Fetch the transaction
                 let params = { "imp_uid": req.body.imp_uid };
@@ -557,7 +558,8 @@ class IamportService {
                         logger.error(error);
                     });
                 break;
-            case 'failed':
+            }
+            case 'failed': {
                 logger.error(`I'mport payment ${req.body.merchant_uid} has failed for some reason.`);
                 // Fetch the transaction
                 let params = { "imp_uid": req.body.imp_uid };
@@ -585,11 +587,14 @@ class IamportService {
                     });
                 // TODO: Disable castr service until new payment method is provided
                 break;
-            case 'cancelled':
+            }
+            case 'cancelled': {
                 // Update database as refunded
                 break;
-            default:
+            }
+            default: {
                 logger.debug(req.body);
+            }
         }
     }
 }
