@@ -1,16 +1,15 @@
 // server.js
 
+'use strict';
+
 require('dotenv').config();
 
 const express = require('express');
-const mongoDB = require('./app/db')
 const bodyParser = require('body-parser');
+const mongoDB = require('./app/db');
+const logger = require('./app/utils').logger();
 const routes = require('./app/routes');
 const iamportService = require('./app/iamport/iamport.service');
-const logger = require('tracer').console({
-    format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
-    dateformat: "mmm. d | HH:MM:ss.L"
-});
 
 const app = express()
 const port = process.env.PORT;

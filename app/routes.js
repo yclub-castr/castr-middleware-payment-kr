@@ -1,7 +1,8 @@
 // app/routes.js
 
-const express = require('express');
+'use strict';
 
+const express = require('express');
 const iamport_router = require('./iamport/iamport.route')
 const op_router = require('./open-platform/op.route')
 
