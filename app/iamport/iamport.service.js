@@ -1,13 +1,15 @@
 'use strict';
 
 const Iamport = require('iamport');
-const moment = require('moment');
+const moment = require('moment-timezone');
 const nodemailer = require('nodemailer');
 const mongoDB = require('../db');
 const logger = require('tracer').console({
     format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
     dateformat: "mmm. d | HH:MM:ss.L"
 });
+
+const timezone = 'ASIA/SEOUL';
 
 const billing_plan_types = {
     "4_WEEK": 4,
@@ -43,34 +45,32 @@ class IamportService {
     }
 
     /**
-     * Triggers checking payment schedules at 6AM everyday.
+     * Triggers checking payment schedules at 6 am everyday.
      */
     _checkScheduleAt6AM() {
         let self = this;
-        logger.debug('Payment schedule watcher initiated');
         let full_day = 24 * 60 * 60 * 1000;
-        let now = new Date();
-        let next_morning = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 6, 0, 0, 0);
-        // Calculate time until next 6AM
-        let time_until = (next_morning.getTime() - now.getTime()) % full_day;
-        // Check for scheduled payments at next 6AM
+        let utc_now = moment.tz('UTC');
+        let local_next_morning = moment(utc_now).add(1, 'day').tz(timezone).hour(6).minute(0).second(0).millisecond(0);
+        // Calculate time until next 6 am
+        let time_until = local_next_morning.diff(utc_now) % full_day;
+        // Check for scheduled payments at next 6 am
         setTimeout(function () { self._checkScheduledPayments(); }, time_until);
+        logger.debug(`Next schedule check scheduled at ${(time_until / 3600000).toFixed(2)} hours later.`);
     }
 
     /**
      * Checks the payment schedules and process them.
+     * This runs daily at 6 am.
      */
     _checkScheduledPayments() {
-        transporter.sendMail(mailOptions)
-            .then(info => logger.debug('Email sent: ' + info.response))
-            .catch(mail_error => logger.error(mail_error))
+        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('MMM DD YYYY')}.`);
         // Find all scheduled payments with pending flag for today and before
-        let now = new Date();
         mongoDB.getDB().collection('payment-schedule').find(
             {
                 "pending": true,
                 "scheduled_date": {
-                    "$lte": new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+                    "$lte": moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate()
                 }
             },
             function (db_error, cursor) {
@@ -130,6 +130,7 @@ class IamportService {
                             .then(function () {
                                 res.send({
                                     "sucecss": true,
+                                    "message": null,
                                     "data": methods
                                 });
                             })
@@ -163,10 +164,10 @@ class IamportService {
             logger.error(msg);
             res.send({
                 "success": false,
+                "message": msg,
                 "error": {
                     "code": 'castr_payment_error'
-                },
-                "message": msg
+                }
             });
             return;
         }
@@ -278,8 +279,10 @@ class IamportService {
                             logger.error(msg);
                             res.send({
                                 "success": false,
-                                "error_code": 'castr_payment_error',
-                                "message": msg
+                                "message": msg,
+                                "error": {
+                                    "code": 'castr_payment_error'
+                                }
                             });
                             return;
                         }
@@ -307,10 +310,10 @@ class IamportService {
             logger.error(msg);
             res.send({
                 "success": false,
+                "message": msg,
                 "error": {
                     "code": 'castr_payment_error'
-                },
-                "message": msg
+                }
             });
             return;
         }
@@ -336,8 +339,11 @@ class IamportService {
                 });
                 return;
             }
-            // Schedule next payment using billing_plan
-            res.send('ok');
+            res.send({
+                "success": true,
+                "message": `Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${req.params.business_id}).`,
+                "data": payment_result
+            });
         });
     }
 
@@ -362,10 +368,10 @@ class IamportService {
                     logger.error(msg);
                     res.send({
                         "success": false,
+                        "message": msg,
                         "error": {
                             "code": 'castr_payment_error'
-                        },
-                        "message": msg
+                        }
                     });
                     return;
                 }
@@ -394,144 +400,29 @@ class IamportService {
         )
     }
 
-    schedule(res, iamport_result) {
-        let custom_data = JSON.parse(iamport_result.custom_data);
-        let customer_uid = custom_data['customer_uid'];
-        let business_id = custom_data['business_id'];
-        let charge_num = custom_data['charge_num'];
-        let billing_plan = custom_data['billing_plan'];
-        // Create next billing date
-        let today = new Date();
-        today.setHours(0, 0, 0);
-        let next_cycle_start = moment.utc(today).add(billing_plan_types[billing_plan], 'week');
-        let next_cycle_end = moment.utc(today).add(billing_plan_types[billing_plan] * 2, 'week').subtract(1, 'day');
-        // TODO
-        logger.debug(iamport_result);
-        this.iamport.subscribe.schedule({
-            "customer_uid": customer_uid,
-            "schedules": [{
-                "merchant_uid": `${business_id}_ch${++charge_num}`,
-                "schedule_at": next_cycle_start.unix(),
-                "amount": iamport_result['amount'],
-                "name": `Castr subscription ${next_cycle_start.format('M/D')} - ${next_cycle_end.format('M/D')} (${billing_plan})`,
-                "custom_data": JSON.stringify({
-                    "customer_uid": customer_uid,
-                    "business_id": business_id,
-                    "billing_plan": billing_plan,
-                    "charge_num": charge_num
-                })
-            }]
-        })
-            .then(schedule_result => {
-                console.log(schedule_result);
-                // Schedule next payment
-                res.send({
-                    "payment": iamport_result,
-                    "schedule": schedule_result
-                });
-            }).catch(iamport_error => {
-                logger.error(iamport_error);
-                res.send({
-                    "payment": iamport_result,
-                    "schedule": {
-                        "error_code": iamport_error.code,
-                        "message": iamport_error.message
-                    }
-                });
-            });
-    }
-
-    unsubscribe(req, res) {
-        this.iamport.subscribe.unschedule({
-            "customer_uid": req.params.customer_uid,
-            "merchant_uid": null
-        })
-            .then(iamport_result => {
-                console.log(iamport_result);
-                res.send(iamport_result);
-            })
-            .catch(iamport_errorerr => {
-                console.log(iamport_error);
-                res.send({
-                    "error_code": iamport_error.code,
-                    "message": iamport_error.message
-                });
-            });
-    }
-
-    /* getHistory(req, res) {
+    getHistory(req, res) {
         let self = this;
-        new Promise()
-        let recursiveFetch = function (customer_uid, data, page) {
-            self.iamport.subscribe_customer.getPayments({
-                "customer_uid": customer_uid,
-                "page": page
-            })
-                .then(iamport_result => {
-                    logger.debug(iamport_result);
-                    if (iamport_result.next !== 0) {
-                        recursiveFetch(customer_uid, data.concat(iamport_result.list), iamport_result.next);
-                    } else {
-                        data.concat(iamport_result.list);
-                    }
-                }).catch(iamport_error => {
-                    logger.error(iamport_error);
-                });
-        }
-        // Find all payment methods under the business
-        mongoDB.getDB().collection('payment-methods').find(
+        // Find all payment transactions from the business
+        mongoDB.getDB().collection('payment-transactions').find(
             { "business_id": req.params.business_id },
             function (db_error, cursor) {
-                let promises = [];
                 let methods = [];
                 cursor.forEach(
                     // Iteration callback
                     function (document) {
-                        // Create a promise for each I'mport request
-
-
-
-
-                         promises.push(self.iamport.subscribe_customer.get({ "customer_uid": document.customer_uid })
-                            .then(iamport_result => {
-                                logger.debug(`Successfully fetched payment method (${iamport_result.customer_uid}) from I'mport.`);
-                                iamport_result.default_method = document.default_method;
-                                methods.push(iamport_result);
-                            }).catch(iamport_error => {
-                                logger.error(iamport_error);
-                                methods.push({
-                                    "error": {
-                                        "code": iamport_error.code,
-                                        "message": iamport_error.message
-                                    }
-                                })
-                            })
-                        ); 
+                        methods.push(document);
                     },
                     // End callback
                     function (error) {
-                        Promise.all(promises)
-                            .then(function () {
-                                res.send({
-                                    "sucecss": true,
-                                    "data": methods
-                                });
-                            })
-                            .catch(err => {
-                                logger.error(err);
-                                res.send({
-                                    "success": false,
-                                    "message": 'Something went wrong during the end callback of cursor iteration',
-                                    "error": {
-                                        "code": err.code,
-                                        "message": err.message
-                                    }
-                                });
-                            })
+                        res.send({
+                            "sucecss": true,
+                            "message": null,
+                            "data": methods
+                        });
                     })
             }
         )
-    } */
+    }
 
     paymentHook(req, res) {
         switch (req.body.status) {
@@ -552,7 +443,7 @@ class IamportService {
                 this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
                     .then(iamport_result => {
                         let custom_data = JSON.parse(iamport_result.custom_data);
-                        let time_paid = new Date(iamport_result.paid_at * 1000);
+                        let time_paid = moment(iamport_result.paid_at * 1000).tz(timezone);
                         // Insert payment result to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
@@ -567,20 +458,21 @@ class IamportService {
                                 "card_name": iamport_result.card_name,
                                 "status": 'paid',
                                 "receipt_url": iamport_result.receipt_url,
-                                "time_paid": time_paid
+                                "time_paid": time_paid.toDate()
                             }
                         );
                         // Calculate next pay date
-                        let next_pay_date = new Date(
-                            time_paid.getFullYear(),
-                            time_paid.getMonth(),
-                            time_paid.getDate() + billing_plan_types[custom_data.billing_plan] * 7,
-                            0, 0, 0, 0);
+                        let next_pay_date = moment(time_paid)
+                            .add(billing_plan_types[custom_data.billing_plan], 'week')
+                            .hour(0)
+                            .minute(0)
+                            .second(0)
+                            .millisecond(0);
                         // Insert to payment-schedule collection
                         mongoDB.getDB().collection('payment-schedule').insertOne(
                             {
                                 "business_id": custom_data.business_id,
-                                "schedule": next_pay_date,
+                                "schedule": next_pay_date.toDate(),
                                 "charge_num": parseInt(custom_data.charge_num) + 1,
                                 "amount": iamport_result.amount,
                                 "billing_plan": custom_data.billing_plan,
