@@ -1,13 +1,12 @@
+// app/iamport/iamport.service.js
+
 'use strict';
 
-const Iamport = require('iamport');
-const moment = require('moment-timezone');
-const nodemailer = require('nodemailer');
 const mongoDB = require('../db');
-const logger = require('tracer').console({
-    format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
-    dateformat: "mmm. d | HH:MM:ss.L"
-});
+const logger = require('../utils').logger();
+const moment = require('../utils').moment();
+const nodemailer = require('nodemailer');
+const Iamport = require('iamport');
 
 const timezone = 'ASIA/SEOUL';
 
@@ -45,7 +44,7 @@ class IamportService {
     }
 
     /**
-     * Triggers checking payment schedules at 6 am everyday.
+     * Triggers checking payment schedules at 6 am everyday (local time).
      */
     _checkScheduleAt6AM() {
         let self = this;
@@ -61,11 +60,11 @@ class IamportService {
 
     /**
      * Checks the payment schedules and process them.
-     * This runs daily at 6 am.
+     * This runs daily at 6 am (local time).
      */
     _checkScheduledPayments() {
         let self = this;
-        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('MMM DD YYYY')}.`);
+        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('ddd, MMM DD, YYYY')}.`);
         // Find all scheduled payments with pending flag for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
@@ -103,7 +102,11 @@ class IamportService {
                                 // Update the successful scheduled payments' pending flag to false
                                 mongoDB.getDB().collection('payment-schedule').updateMany(
                                     { "merchant_uid": { "$in": successful_payments } },
-                                    { "$set": { "pending": false } }
+                                    { "$set": { "pending": false } },
+                                    function (db_error, write_result) {
+                                        if (db_error) { logger.error(db_error) };
+                                        logger.debug(`(${write_result.modifiedCount}/${promises.length}) scheduled payments were successful.`)
+                                    }
                                 );
                             })
                             .catch(err => {
@@ -343,9 +346,8 @@ class IamportService {
             });
             return;
         }
-        let business_id = req.params.business_id
+        let business_id = req.params.business_id;
         let charge_num = req.body.charge_num || 0;
-
         let data = {
             "merchant_uid": `${business_id}_ch${charge_num}`,
             "billing_plan": billing_plan,
@@ -403,7 +405,7 @@ class IamportService {
                     self.iamport.subscribe.again({
                         "merchant_uid": data.merchant_uid,
                         "customer_uid": default_method.customer_uid,
-                        "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
+                        "name": `[${business_id}] Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
                         "amount": data.amount,
                         "vat": data.vat,
                         "custom_data": JSON.stringify({
@@ -426,8 +428,12 @@ class IamportService {
         });
     }
 
+    /**
+     * Fetches all payment transactions from the business ('business_id').
+     * @param {*} req 
+     * @param {*} res 
+     */
     getHistory(req, res) {
-        let self = this;
         // Find all payment transactions from the business
         mongoDB.getDB().collection('payment-transactions').find(
             { "business_id": req.params.business_id },
@@ -436,10 +442,13 @@ class IamportService {
                 cursor.forEach(
                     // Iteration callback
                     function (document) {
+                        document.pay_date_kr = moment(document.pay_date).tz(timezone).format('LL');
+                        document.time_paid_kr = moment(document.time_paid).tz(timezone).format('LL');
                         methods.push(document);
                     },
                     // End callback
                     function (error) {
+                        logger.debug(`Transaction history fetched for business (${req.params.business_id})`);
                         res.send({
                             "sucecss": true,
                             "message": null,
