@@ -69,20 +69,38 @@ class IamportService {
         mongoDB.getDB().collection('payment-schedule').find(
             {
                 "pending": true,
-                "scheduled_date": {
+                "schedule": {
                     "$lte": moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate()
                 }
             },
             function (db_error, cursor) {
+                let successful_payments = [];
                 cursor.forEach(
                     // Iteration callback
                     function (document) {
-                        console.log(document.scheduled_date);
+                        let data = {
+                            "billing_plan": document.billing_plan,
+                            "charge_num": document.charge_num,
+                            "amount": document.amount,
+                            "vat": document.vat
+                        };
                         // Make the payment
+                        this.pay(document.business_id, data, function (payment_error, payment_result) {
+                            if (payment_error) {
+                                logger.error(payment_error);
+                                return;
+                            }
+                            successful_payments.push(payment_result.merchant_uid);
+                            logger.debug(`Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${document.business_id}).`);
+                        });
                     },
                     // End callback
                     function (error) {
-                        // Do nothing
+                        // Update the successful scheduled payments' pending flag to false
+                        mongoDB.getDB().collection('payment-schedule').updateMany(
+                            { "merchant_uid": { "$in": successful_payments } },
+                            { "$set": { "pending": false } }
+                        );
                     }
                 )
             }
@@ -317,10 +335,7 @@ class IamportService {
             });
             return;
         }
-        let start = moment().utc();
-        let end = moment().utc().add(billing_plan_types[billing_plan], 'week').subtract(1, 'day');
         let data = {
-            "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
             "billing_plan": billing_plan,
             "charge_num": req.body.charge_num,
             "amount": req.body.amount,
@@ -375,17 +390,20 @@ class IamportService {
                     });
                     return;
                 }
+                let start = moment.tz(timezone);
+                let end = moment(start).add(billing_plan_types[data.billing_plan], 'week').subtract(1, 'day');
                 // Request I'mport for payment
                 self.iamport.subscribe.again({
                     "merchant_uid": `${business_id}_ch${data.charge_num}`,
                     "customer_uid": default_method.customer_uid,
-                    "name": data.name,
+                    "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
                     "amount": data.amount,
                     "vat": data.vat,
                     "custom_data": JSON.stringify({
                         "business_id": business_id,
                         "customer_uid": default_method.customer_uid,
                         "billing_plan": data.billing_plan,
+                        "vat": data.vat,
                         "charge_num": data.charge_num
                     })
                 })
@@ -451,8 +469,9 @@ class IamportService {
                                 "imp_uid": iamport_result.imp_uid,
                                 "merchant_uid": iamport_result.merchant_uid,
                                 "name": iamport_result.name,
-                                "amount": iamport_result.amount,
                                 "currency": iamport_result.currency,
+                                "amount": iamport_result.amount,
+                                "vat": custom_data.vat,
                                 "customer_uid": custom_data.customer_uid,
                                 "pay_method": iamport_result.pay_method,
                                 "card_name": iamport_result.card_name,
@@ -471,10 +490,12 @@ class IamportService {
                         // Insert to payment-schedule collection
                         mongoDB.getDB().collection('payment-schedule').insertOne(
                             {
+                                "merchant_uid": iamport_result.merchant_uid,
                                 "business_id": custom_data.business_id,
                                 "schedule": next_pay_date.toDate(),
                                 "charge_num": parseInt(custom_data.charge_num) + 1,
                                 "amount": iamport_result.amount,
+                                "vat": custom_data.vat,
                                 "billing_plan": custom_data.billing_plan,
                                 "pending": true
                             }
