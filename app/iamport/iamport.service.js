@@ -335,14 +335,16 @@ class IamportService {
             });
             return;
         }
+        let business_id = req.params.business_id
+        let charge_num = req.body.charge_num || 0;
         let data = {
+            "merchant_uid": `${business_id}_ch${charge_num}`,
             "billing_plan": billing_plan,
-            "charge_num": req.body.charge_num,
             "amount": req.body.amount,
             "vat": req.body.vat
         };
         // Process initial payment
-        this.pay(req.params.business_id, data, function (payment_error, payment_result) {
+        this.pay(business_id, data, function (payment_error, payment_result) {
             if (payment_error) {
                 res.send({
                     "success": false,
@@ -394,7 +396,7 @@ class IamportService {
                 let end = moment(start).add(billing_plan_types[data.billing_plan], 'week').subtract(1, 'day');
                 // Request I'mport for payment
                 self.iamport.subscribe.again({
-                    "merchant_uid": `${business_id}_ch${data.charge_num}`,
+                    "merchant_uid": data.merchant_uid,
                     "customer_uid": default_method.customer_uid,
                     "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
                     "amount": data.amount,
@@ -403,8 +405,7 @@ class IamportService {
                         "business_id": business_id,
                         "customer_uid": default_method.customer_uid,
                         "billing_plan": data.billing_plan,
-                        "vat": data.vat,
-                        "charge_num": data.charge_num
+                        "vat": data.vat
                     })
                 })
                     .then(iamport_result => {
@@ -488,12 +489,12 @@ class IamportService {
                             .second(0)
                             .millisecond(0);
                         // Insert to payment-schedule collection
+                        let charge_num = parseInt(iamport_result.merchant_uid.match(/\d+$/)[0]) + 1;
                         mongoDB.getDB().collection('payment-schedule').insertOne(
                             {
-                                "merchant_uid": iamport_result.merchant_uid,
+                                "merchant_uid": `${custom_data.business_id}_ch${charge_num}`,
                                 "business_id": custom_data.business_id,
                                 "schedule": next_pay_date.toDate(),
-                                "charge_num": parseInt(custom_data.charge_num) + 1,
                                 "amount": iamport_result.amount,
                                 "vat": custom_data.vat,
                                 "billing_plan": custom_data.billing_plan,
