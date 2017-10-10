@@ -64,43 +64,51 @@ class IamportService {
      * This runs daily at 6 am.
      */
     _checkScheduledPayments() {
+        let self = this;
         logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('MMM DD YYYY')}.`);
         // Find all scheduled payments with pending flag for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
                 "pending": true,
-                "schedule": {
-                    "$lte": moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate()
-                }
+                "schedule": { "$lte": moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate() }
             },
             function (db_error, cursor) {
                 let successful_payments = [];
+                let promises = [];
                 cursor.forEach(
                     // Iteration callback
                     function (document) {
                         let data = {
                             "merchant_uid": document.merchant_uid,
                             "billing_plan": document.billing_plan,
+                            "pay_date": document.schedule,
                             "amount": document.amount,
                             "vat": document.vat
                         };
                         // Make the payment
-                        this.pay(document.business_id, data, function (payment_error, payment_result) {
-                            if (payment_error) {
+                        promises.push(self.pay(document.business_id, data)
+                            .then(function (payment_result) {
+                                successful_payments.push(payment_result.merchant_uid);
+                                logger.debug(`Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${document.business_id}).`);
+                            })
+                            .catch(function (payment_error) {
                                 logger.error(payment_error);
-                                return;
-                            }
-                            successful_payments.push(payment_result.merchant_uid);
-                            logger.debug(`Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${document.business_id}).`);
-                        });
+                            })
+                        );
                     },
                     // End callback
                     function (error) {
-                        // Update the successful scheduled payments' pending flag to false
-                        mongoDB.getDB().collection('payment-schedule').updateMany(
-                            { "merchant_uid": { "$in": successful_payments } },
-                            { "$set": { "pending": false } }
-                        );
+                        Promise.all(promises)
+                            .then(function () {
+                                // Update the successful scheduled payments' pending flag to false
+                                mongoDB.getDB().collection('payment-schedule').updateMany(
+                                    { "merchant_uid": { "$in": successful_payments } },
+                                    { "$set": { "pending": false } }
+                                );
+                            })
+                            .catch(err => {
+                                logger.error(err);
+                            });
                     }
                 )
             }
@@ -337,15 +345,24 @@ class IamportService {
         }
         let business_id = req.params.business_id
         let charge_num = req.body.charge_num || 0;
+
         let data = {
             "merchant_uid": `${business_id}_ch${charge_num}`,
             "billing_plan": billing_plan,
+            "pay_date": moment().toDate(),
             "amount": req.body.amount,
             "vat": req.body.vat
         };
         // Process initial payment
-        this.pay(business_id, data, function (payment_error, payment_result) {
-            if (payment_error) {
+        this.pay(business_id, data)
+            .then(function (payment_result) {
+                res.send({
+                    "success": true,
+                    "message": `Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${req.params.business_id}).`,
+                    "data": payment_result
+                });
+            })
+            .catch(function (payment_error) {
                 res.send({
                     "success": false,
                     "message": 'Something went wrong with I\'mport while charging the initial payment.',
@@ -355,68 +372,58 @@ class IamportService {
                     }
                 });
                 return;
-            }
-            res.send({
-                "success": true,
-                "message": `Initial payment of (${payment_result.amount} ${payment_result.currency}) was successfully charged to the business (${req.params.business_id}).`,
-                "data": payment_result
             });
-        });
     }
 
     /**
      * Processes a one-time payment using the default payment method set for the business ('business_id').
+     * Returns a promise.
      * @param {*} business_id 
      * @param {*} data
-     * @param {*} callback 
      */
-    pay(business_id, data, callback) {
+    pay(business_id, data) {
         let self = this;
-        // Fetch the default payment method
-        mongoDB.getDB().collection('payment-methods').findOne(
-            {
-                "business_id": business_id,
-                "default_method": true
-            },
-            function (db_error, default_method) {
-                // If no default method was found, return error
-                if (default_method === null) {
-                    let msg = `Could not find a default payment method for the business (${business_id}).`;
-                    logger.error(msg);
-                    res.send({
-                        "success": false,
-                        "message": msg,
-                        "error": {
-                            "code": 'castr_payment_error'
-                        }
-                    });
-                    return;
-                }
-                let start = moment.tz(timezone);
-                let end = moment(start).add(billing_plan_types[data.billing_plan], 'week').subtract(1, 'day');
-                // Request I'mport for payment
-                self.iamport.subscribe.again({
-                    "merchant_uid": data.merchant_uid,
-                    "customer_uid": default_method.customer_uid,
-                    "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
-                    "amount": data.amount,
-                    "vat": data.vat,
-                    "custom_data": JSON.stringify({
-                        "business_id": business_id,
+        return new Promise(function (resolve, reject) {
+            // Fetch the default payment method
+            mongoDB.getDB().collection('payment-methods').findOne(
+                {
+                    "business_id": business_id,
+                    "default_method": true
+                },
+                function (db_error, default_method) {
+                    // If no default method was found, return error
+                    if (default_method === null) {
+                        let msg = `Could not find a default payment method for the business (${business_id}).`;
+                        logger.error(msg);
+                        reject(new Error(msg));
+                    }
+                    let start = moment(data.pay_date).tz(timezone);
+                    let end = moment(start).add(billing_plan_types[data.billing_plan], 'week').subtract(1, 'day');
+                    // Request I'mport for payment
+                    self.iamport.subscribe.again({
+                        "merchant_uid": data.merchant_uid,
                         "customer_uid": default_method.customer_uid,
-                        "billing_plan": data.billing_plan,
-                        "vat": data.vat
+                        "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
+                        "amount": data.amount,
+                        "vat": data.vat,
+                        "custom_data": JSON.stringify({
+                            "business_id": business_id,
+                            "customer_uid": default_method.customer_uid,
+                            "billing_plan": data.billing_plan,
+                            "pay_date": data.pay_date,
+                            "vat": data.vat
+                        })
                     })
-                })
-                    .then(iamport_result => {
-                        logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
-                        callback(null, iamport_result);
-                    }).catch(iamport_error => {
-                        logger.error(iamport_error);
-                        callback(iamport_error, null);
-                    });
-            }
-        )
+                        .then(iamport_result => {
+                            logger.debug(`Successfully made the payment (${iamport_result.merchant_uid}).`);
+                            resolve(iamport_result);
+                        }).catch(iamport_error => {
+                            logger.error(iamport_error);
+                            reject(iamport_error);
+                        });
+                }
+            )
+        });
     }
 
     getHistory(req, res) {
@@ -462,7 +469,7 @@ class IamportService {
                 this.iamport.payment.getByImpUid({ "imp_uid": req.body.imp_uid })
                     .then(iamport_result => {
                         let custom_data = JSON.parse(iamport_result.custom_data);
-                        let time_paid = moment(iamport_result.paid_at * 1000).tz(timezone);
+                        let pay_date = custom_data.pay_date;
                         // Insert payment result to db
                         mongoDB.getDB().collection('payment-transactions').insertOne(
                             {
@@ -478,11 +485,12 @@ class IamportService {
                                 "card_name": iamport_result.card_name,
                                 "status": 'paid',
                                 "receipt_url": iamport_result.receipt_url,
-                                "time_paid": time_paid.toDate()
+                                "pay_date": pay_date,
+                                "time_paid": moment(iamport_result.paid_at * 1000).toDate()
                             }
                         );
                         // Calculate next pay date
-                        let next_pay_date = moment(time_paid)
+                        let next_pay_date = moment(pay_date).tz(timezone)
                             .add(billing_plan_types[custom_data.billing_plan], 'week')
                             .hour(0)
                             .minute(0)
