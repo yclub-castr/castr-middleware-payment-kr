@@ -2,11 +2,13 @@
 
 'use strict';
 
+// Tracer - logger
 const logger = require('tracer').console({
     format: "[{{timestamp}}] <{{title}}> {{message}} - ({{file}}:{{line}})",
     dateformat: "mmm. d | HH:MM:ss.L"
 });
 
+// Moment - date wrapper
 const moment = require('moment-timezone');
 moment.locale('kr', {
     "months": ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'],
@@ -31,11 +33,28 @@ moment.locale('kr', {
     }
 })
 
+// Nodemailer - email transporter
+const nodemailer = require('nodemailer');
+const transporter = nodemailer.createTransport({
+    "service": 'Gmail',
+    "auth": {
+        "type": 'OAuth2',
+        "user": process.env.FROM_EMAIL_ID,
+        "clientId": process.env.GMAIL_CLIENT_ID,
+        "clientSecret": process.env.GMAIL_CLIENT_SECRET,
+        "refreshToken": process.env.GMAIL_REFRESH_TOKEN,
+        "accessToken": process.env.GMAIL_ACCESS_TOKEN
+    }
+});
+
 module.exports = {
     "logger": function () {
         return logger;
     },
     "moment": function () {
         return moment;
+    },
+    "nodemailer": function () {
+        return transporter;
     }
 }

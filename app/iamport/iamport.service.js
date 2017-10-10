@@ -5,7 +5,7 @@
 const mongoDB = require('../db');
 const logger = require('../utils').logger();
 const moment = require('../utils').moment();
-const nodemailer = require('nodemailer');
+const nodemailer = require('../utils').nodemailer();
 const Iamport = require('iamport');
 
 const timezone = 'ASIA/SEOUL';
@@ -14,25 +14,6 @@ const billing_plan_types = {
     "4_WEEK": 4,
     "26_WEEK": 26,
     "52_WEEK": 52
-};
-
-const transporter = nodemailer.createTransport({
-    "service": 'Gmail',
-    "auth": {
-        "type": 'OAuth2',
-        "user": process.env.FROM_EMAIL_ID,
-        "clientId": process.env.GMAIL_CLIENT_ID,
-        "clientSecret": process.env.GMAIL_CLIENT_SECRET,
-        "refreshToken": process.env.GMAIL_REFRESH_TOKEN,
-        "accessToken": process.env.GMAIL_ACCESS_TOKEN
-    }
-});
-
-const mailOptions = {
-    "from": process.env.FROM_EMAIL_ID,
-    "to": process.env.TO_EMAIL_IDS,
-    "subject": 'Payment Statement',
-    "text": `Date: ${new Date()}\nMessage: Testing...`
 };
 
 class IamportService {
@@ -463,13 +444,14 @@ class IamportService {
         switch (req.body.status) {
             case 'ready':
                 // This shouldn't happen, will it?
+                // Send email just in case!
                 let email = {
                     "from": process.env.FROM_EMAIL_ID,
                     "to": process.env.TO_EMAIL_IDS,
                     "subject": 'Payment Ready',
                     "text": JSON.stringify(req.body)
                 };
-                transporter.sendMail(email)
+                nodemailer.sendMail(email)
                     .then(info => logger.debug('Email sent: ' + info.response))
                     .catch(mail_error => logger.error(mail_error));
                 break;
@@ -533,13 +515,13 @@ class IamportService {
                             "subject": 'Payment Failed',
                             "text": JSON.stringify(iamport_result)
                         };
-                        transporter.sendMail(email)
+                        nodemailer.sendMail(email)
                             .then(info => logger.debug('Email sent: ' + info.response))
                             .catch(mail_error => logger.error(mail_error));
                     }).catch(iamport_error => {
                         logger.error(iamport_error);
                     });
-                // Disable service
+                // TODO: Disable service
                 break;
             case 'cancelled':
                 // Update database as refunded
