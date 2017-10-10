@@ -396,7 +396,7 @@ class IamportService {
                 self.iamport.subscribe.again({
                     "merchant_uid": `${business_id}_ch${data.charge_num}`,
                     "customer_uid": default_method.customer_uid,
-                    "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${billing_plan})`,
+                    "name": `Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
                     "amount": data.amount,
                     "vat": data.vat,
                     "custom_data": JSON.stringify({
