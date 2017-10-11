@@ -30,9 +30,11 @@
         "max-len": [
             "warn",
             {
-                "code": 150,
+                "code": 100,
                 "ignoreComments": true,
-                "ignoreStrings": true
+                "ignoreStrings": true,
+                "ignoreTemplateLiterals": true,
+                "ignoreRegExpLiterals": true
             }
         ],
         "import/newline-after-import": "warn",
@@ -56,7 +58,15 @@
                 "functions": "never"
             }
         ],
-        "class-methods-use-this": "warn",
+        "class-methods-use-this": [
+            "error",
+            {
+                "exceptMethods": [
+                    "setAsDefault",
+                    "getHistory"
+                ]
+            }
+        ],
         "no-useless-return": "warn",
         "no-param-reassign": [
             "warn",
