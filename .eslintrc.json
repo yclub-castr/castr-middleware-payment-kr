@@ -59,7 +59,7 @@
             }
         ],
         "class-methods-use-this": [
-            "error",
+            "warn",
             {
                 "exceptMethods": [
                     "setAsDefault",
