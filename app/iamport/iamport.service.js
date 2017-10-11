@@ -615,4 +615,4 @@ class IamportService {
     }
 }
 
-module.exports = new IamportService();
+module.exports = IamportService;
