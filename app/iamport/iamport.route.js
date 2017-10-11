@@ -7,6 +7,9 @@ const iamportService = require('./iamport.service');
 
 const router = express.Router();
 
+/**
+ * Get all payment methods under ':business_id'
+ */
 router.get('/:business_id', (req, res) => {
     // Uses 'customer_uid' to retrieve the payment method
     iamportService.getPaymentMethods(req, res);
@@ -29,6 +32,7 @@ router.route('/:business_id/payment-method')
         iamportService.deletePaymentMethod(req, res);
     });
 
+
 /**
  * Set the payment method as the default for this business.
  */
@@ -44,13 +48,34 @@ router.post('/:business_id/subscribe', (req, res) => {
     iamportService.subscribe(req, res);
 });
 
+/**
+ * TODO: Stop next scheduled payment until resumed
+ */
+router.post('/:business_id/pause', (req, res) => {
+    iamportService.pause(req, res);
+});
+
+/**
+ * TODO: Process paused scheduled payment
+ */
+router.post('/:business_id/resume', (req, res) => {
+    iamportService.resume(req, res);
+});
+
+/**
+ * TODO: Refund service fee for the current billing cycle (80% of prorated)
+ */
+router.post('/:business_id/cancel', (req, res) => {
+    iamportService.cancel(req, res);
+});
+
 /*
  * Use the business_id (formerly restaurant_id) for the `merchant_uid`.
  * This will retrieve all the transaction history for a specific `merchant_uid` (which is mapped to a specific business).
 */
 router.get('/:business_id/history', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
-    iamportService.getHistory(req, res, [], 1);
+    iamportService.getHistory(req, res);
 });
 
 router.route('/payment-hook')

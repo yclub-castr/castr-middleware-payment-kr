@@ -437,7 +437,7 @@ class IamportService {
                     const params = {
                         merchant_uid: data.merchant_uid,
                         customer_uid: default_method.customer_uid,
-                        name: `[${business_id}] Castr subscription ${start.format('M/D')} - ${end.format('M/D')} (${data.billing_plan})`,
+                        name: `${business_id}|Castr(${billing_plan_types[data.billing_plan]})|${start.format('M/D')}-${end.format('M/D')}`,
                         amount: data.amount,
                         vat: data.vat,
                         custom_data: JSON.stringify({
@@ -467,6 +467,18 @@ class IamportService {
                 }
             );
         }));
+    }
+
+    pause(req, res) {
+        logger.debug('pause invoked.');
+    }
+
+    resume(req, res) {
+        logger.debug('resume invoked.');
+    }
+
+    cancel(req, res) {
+        logger.debug('cancel invoked.');
     }
 
     /**
@@ -605,7 +617,7 @@ class IamportService {
                 break;
             }
             case 'cancelled': {
-                // Update database as refunded
+                // TODO: Update database as refunded
                 break;
             }
             default: {
