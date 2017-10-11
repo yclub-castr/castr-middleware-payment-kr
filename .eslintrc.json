@@ -58,8 +58,12 @@
         ],
         "class-methods-use-this": "warn",
         "no-useless-return": "warn",
-        "no-param-reassign": ["warn", {
-            "props": false
-        }]
+        "no-param-reassign": [
+            "warn",
+            {
+                "props": false
+            }
+        ],
+        "no-prototype-builtins": "off"
     }
 }
