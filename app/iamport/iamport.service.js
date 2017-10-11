@@ -74,7 +74,7 @@ class IamportService {
                 })
                 .catch((payment_error) => {
                     failed_payments.push(payment_error);
-                    payment_error.message = `Something went wrong with I'mport while charging scheduled payment (${merchant_uid}).`;
+                    payment_error.message = `Something went wrong with I'mport while charging scheduled payment (${data.merchant_uid}).`;
                     logger.error(payment_error);
                 }));
         };
@@ -159,7 +159,7 @@ class IamportService {
                 })
                 .catch((iamport_error) => {
                     const error = {
-                        message: `Failed to fetch payment method (${customer_uid}) from I'mport.`,
+                        message: `Failed to fetch payment method (${params.customer_uid}) from I'mport.`,
                         params: params,
                         error: {
                             code: iamport_error.code,
