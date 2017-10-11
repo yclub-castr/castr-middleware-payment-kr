@@ -3,12 +3,12 @@
 'use strict';
 
 const express = require('express');
-const iamport_router = require('./iamport/iamport.route')
-const op_router = require('./open-platform/op.route')
+const iamport_router = require('./iamport/iamport.route');
+const op_router = require('./open-platform/op.route');
 
 const router = express.Router();
 
-router.get('/', function (req, res) {
+router.get('/', (req, res) => {
     res.send('It\'s alive!!!');
 });
 
