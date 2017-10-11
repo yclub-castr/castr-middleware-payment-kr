@@ -37,7 +37,7 @@
         ],
         "import/newline-after-import": "warn",
         "camelcase": "off",
-        "prefer-desctructing": "off",
+        "prefer-destructuring": "off",
         "object-shorthand": "off",
         "radix": "off",
         "no-trailing-spaces": [
