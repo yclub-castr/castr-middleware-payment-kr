@@ -44,7 +44,7 @@
         //         "array": true
         //     }
         // ],
-        "object-shorthand": "warn",
+        "object-shorthand": "off",
         "radix": "off",
         "no-trailing-spaces": [
             "off",
@@ -63,6 +63,9 @@
             }
         ],
         "class-methods-use-this": "warn",
-        "no-useless-return":"warn"
+        "no-useless-return": "warn",
+        "no-param-reassign": ["warn", {
+            "props": false
+        }]
     }
 }
