@@ -104,7 +104,7 @@ class IamportService {
                                 return;
                             }
                             logger.debug(`(${write_result.modifiedCount}/${promises.length}) scheduled payments failed.`);
-                        },
+                        }
                     );
                 })
                 .catch((err) => {
@@ -132,7 +132,7 @@ class IamportService {
                     // End callback
                     end_callback
                 );
-            },
+            }
         );
         // Schdule payment-schedule check at next 6AM
         this.checkScheduleAt6AM();
@@ -358,9 +358,9 @@ class IamportService {
                             message: `Payment method (${req.params.customer_uid}) has been set as default.`,
                             data: { customer_uid: req.params.customer_uid },
                         });
-                    },
+                    }
                 );
-            },
+            }
         );
     }
 
@@ -464,7 +464,7 @@ class IamportService {
                             };
                             reject(error);
                         });
-                },
+                }
             );
         }));
     }
@@ -498,7 +498,7 @@ class IamportService {
                         });
                     }
                 );
-            },
+            }
         );
     }
 

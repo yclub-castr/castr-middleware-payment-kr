@@ -53,7 +53,7 @@
                 "objects": "always-multiline",
                 "imports": "never",
                 "exports": "never",
-                "functions": "ignore"
+                "functions": "never"
             }
         ],
         "class-methods-use-this": "warn",
