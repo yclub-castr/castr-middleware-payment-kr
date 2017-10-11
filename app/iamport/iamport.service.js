@@ -325,7 +325,7 @@ class IamportService {
      * @param {*} req 
      * @param {*} res 
      */
-    static setAsDefault(req, res) {
+    setAsDefault(req, res) {
         // Unset the current default method   
         mongoDB.getDB().collection('payment-methods').updateOne(
             {
@@ -474,7 +474,7 @@ class IamportService {
      * @param {*} req 
      * @param {*} res 
      */
-    static getHistory(req, res) {
+    getHistory(req, res) {
         // Find all payment transactions from the business
         mongoDB.getDB().collection('payment-transactions').find(
             { business_id: req.params.business_id },
