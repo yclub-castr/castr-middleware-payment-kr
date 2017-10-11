@@ -30,7 +30,7 @@
         "max-len": [
             "warn",
             {
-                "code": 100,
+                "code": 120,
                 "ignoreComments": true,
                 "ignoreStrings": true,
                 "ignoreTemplateLiterals": true,
@@ -74,6 +74,7 @@
                 "props": false
             }
         ],
-        "no-prototype-builtins": "off"
+        "no-prototype-builtins": "off",
+        "newline-per-chained-call": "off"
     }
 }
