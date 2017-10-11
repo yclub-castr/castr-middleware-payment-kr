@@ -3,14 +3,13 @@
 'use strict';
 
 const express = require('express');
-const IamportService = require('./iamport.service');
+const iamportService = require('./iamport.service');
 
 const router = express.Router();
-const iamport_service = new IamportService();
 
 router.get('/:business_id', (req, res) => {
     // Uses 'customer_uid' to retrieve the payment method
-    iamport_service.getPaymentMethods(req, res);
+    iamportService.getPaymentMethods(req, res);
 });
 
 /**
@@ -23,18 +22,18 @@ router.get('/:business_id', (req, res) => {
 router.route('/:business_id/payment-method')
     .post((req, res) => {
         // Creates a customer (single payment method) using the provided 'customer_uid'
-        iamport_service.createPaymentMethod(req, res);
+        iamportService.createPaymentMethod(req, res);
     })
     .delete((req, res) => {
         // Uses 'customer_uid' to delete the payment method
-        iamport_service.deletePaymentMethod(req, res);
+        iamportService.deletePaymentMethod(req, res);
     });
 
 /**
  * Set the payment method as the default for this business.
  */
 router.post('/:business_id/payment-method/:customer_uid', (req, res) => {
-    IamportService.setAsDefault(req, res);
+    iamportService.setAsDefault(req, res);
 });
 
 /**
@@ -42,7 +41,7 @@ router.post('/:business_id/payment-method/:customer_uid', (req, res) => {
  */
 router.post('/:business_id/subscribe', (req, res) => {
     // Processes a one-time payment with the provided `customer_uid`
-    iamport_service.subscribe(req, res);
+    iamportService.subscribe(req, res);
 });
 
 /*
@@ -51,13 +50,13 @@ router.post('/:business_id/subscribe', (req, res) => {
 */
 router.get('/:business_id/history', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
-    IamportService.getHistory(req, res, [], 1);
+    iamportService.getHistory(req, res, [], 1);
 });
 
 router.route('/payment-hook')
     .post((req, res) => {
         // This endpoint will be reserved for Iamport to send success/failure result on payment transactions
-        iamport_service.paymentHook(req, res);
+        iamportService.paymentHook(req, res);
     });
 
 module.exports = router;
