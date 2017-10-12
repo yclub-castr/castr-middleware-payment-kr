@@ -65,7 +65,7 @@ class IamportService {
      * This runs daily at 6 am (local time).
      */
     _checkScheduledPayments() {
-        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone.seoul).format('ddd, MMM DD, YYYY')}.`);
+        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone.seoul).format('LL')}.`);
         // Result arrays
         const promises = [];
         const successes = [];
@@ -102,8 +102,10 @@ class IamportService {
                     (end) => {
                         Promise.all(promises)
                             .then(() => {
-                                logger.debug(`Scheduled payments requested (${successes.length}/${promises.length}):${successes}`);
-                                logger.error(`Scheduled payment requests failed (${failures.length}/${promises.length}):${failures}`);
+                                logger.debug(`(${successes.length}/${promises.length}) scheduled payment requests approved:${successes}`);
+                                if (failures.length !== 0) {
+                                    logger.error(`(${failures.length}/${promises.length}) scheduled payment requests failed:${failures}`);
+                                }
                             })
                             .catch((err) => {
                                 // This shouldn't happen
@@ -458,6 +460,7 @@ class IamportService {
                                     },
                                 };
                                 reject(error);
+                                return;
                             }
                             resolve({ data: iamport_result });
                         })
@@ -505,12 +508,12 @@ class IamportService {
                     (document) => {
                         document.pay_date = {
                             date: document.pay_date,
-                            string: moment(document.pay_date).locale('en').tz(timezone.utc).format('LL'),
+                            string: moment(document.pay_date).tz(timezone.utc).format('LL'),
                             string_kr: moment(document.pay_date).locale('kr').tz(timezone.seoul).format('LL'),
                         };
                         document.time_paid = {
                             date: document.time_paid,
-                            string: moment(document.time_paid).locale('en').tz(timezone.utc).format('LL'),
+                            string: moment(document.time_paid).tz(timezone.utc).format('LL'),
                             string_kr: moment(document.time_paid).locale('kr').tz(timezone.seoul).format('LL'),
                         };
                         methods.push(document);
@@ -536,7 +539,7 @@ class IamportService {
         switch (status) {
             case status_type.paid: {
                 const custom_data = JSON.parse(iamport_result.custom_data);
-                logger.debug(`Payment request approved & processed (${custom_data.merchant_uid})`);
+                let log_string = `approved & processed (${custom_data.merchant_uid})`;
                 if (custom_data.type === payment_type.scheduled) {
                     // If payment was a scheduled payment, update the scheduled payments status to PAID
                     mongoDB.getDB().collection('payment-schedule').updateOne(
@@ -544,29 +547,38 @@ class IamportService {
                         { $set: { status: status } },
                         (db_error, write_result) => {
                             if (db_error) { logger.error(db_error); }
+                            log_string = `Scheduled payment ${log_string}`;
                         }
                     );
                 } else if (custom_data.type === payment_type.initial) {
+                    log_string = `Initial payment ${log_string}`;
                     // TODO: Enable Castr service
+                    logger.debug(`Enabling Castr service for business (${custom_data.business_id})`);
                 }
                 // Insert payment result to db
-                mongoDB.getDB().collection('payment-transactions').insertOne({
-                    business_id: custom_data.business_id,
-                    imp_uid: iamport_result.imp_uid,
-                    merchant_uid: custom_data.merchant_uid,
-                    type: custom_data.type,
-                    name: custom_data.name,
-                    currency: iamport_result.currency,
-                    amount: custom_data.amount,
-                    vat: custom_data.vat,
-                    customer_uid: custom_data.customer_uid,
-                    pay_method: iamport_result.pay_method,
-                    card_name: iamport_result.card_name,
-                    status: status,
-                    receipt_url: iamport_result.receipt_url,
-                    pay_date: custom_data.pay_date,
-                    time_paid: moment(iamport_result.paid_at * 1000).toDate(),
-                });
+                mongoDB.getDB().collection('payment-transactions').insertOne(
+                    {
+                        business_id: custom_data.business_id,
+                        imp_uid: iamport_result.imp_uid,
+                        merchant_uid: custom_data.merchant_uid,
+                        type: custom_data.type,
+                        name: custom_data.name,
+                        currency: iamport_result.currency,
+                        amount: custom_data.amount,
+                        vat: custom_data.vat,
+                        customer_uid: custom_data.customer_uid,
+                        pay_method: iamport_result.pay_method,
+                        card_name: iamport_result.card_name,
+                        status: status,
+                        receipt_url: iamport_result.receipt_url,
+                        pay_date: custom_data.pay_date,
+                        time_paid: moment(iamport_result.paid_at * 1000).toDate(),
+                    },
+                    (db_error) => {
+                        if (db_error) { logger.error(db_error); }
+                        logger.debug(log_string);
+                    }
+                );
                 // Calculate next pay date
                 const next_pay_date = moment(custom_data.pay_date).tz(timezone.seoul)
                     .add(billing_plan_type[custom_data.billing_plan], 'week')
@@ -576,15 +588,22 @@ class IamportService {
                     .millisecond(0);
                 // Insert to payment-schedule collection
                 const next_charge_num = parseInt(custom_data.merchant_uid.match(/\d+$/)[0]) + 1;
-                mongoDB.getDB().collection('payment-schedule').insertOne({
-                    merchant_uid: `${custom_data.business_id}_ch${next_charge_num}`,
-                    business_id: custom_data.business_id,
-                    schedule: next_pay_date.toDate(),
-                    amount: custom_data.amount,
-                    vat: custom_data.vat,
-                    billing_plan: custom_data.billing_plan,
-                    status: status_type.pending,
-                });
+                const next_merchant_uid = `${custom_data.business_id}_ch${next_charge_num}`;
+                mongoDB.getDB().collection('payment-schedule').insertOne(
+                    {
+                        merchant_uid: next_merchant_uid,
+                        business_id: custom_data.business_id,
+                        schedule: next_pay_date.toDate(),
+                        amount: custom_data.amount,
+                        vat: custom_data.vat,
+                        billing_plan: custom_data.billing_plan,
+                        status: status_type.pending,
+                    },
+                    (db_error) => {
+                        if (db_error) { logger.error(db_error); }
+                        logger.debug(`Next payment (${next_merchant_uid}) scheduled for ${next_pay_date.format('LL')}`);
+                    }
+                );
                 break;
             }
             case status_type.cancelled: {
@@ -594,7 +613,6 @@ class IamportService {
             }
             case status_type.failed: {
                 const custom_data = JSON.parse(iamport_result.custom_data);
-                logger.error(`Payment request rejected (${custom_data.merchant_uid})`);
                 // If payment was a scheduled payment, update the scheduled payments status to FAILED
                 if (custom_data.type === payment_type.scheduled) {
                     const failure = {
@@ -616,9 +634,11 @@ class IamportService {
                         },
                         (db_error, write_result) => {
                             if (db_error) { logger.error(db_error); }
+                            logger.debug(`Scheduled payment (${custom_data.merchant_uid}) rejected`);
                         }
                     );
                     // TODO: Disable castr service until failed payment is resolved
+                    logger.debug(`Disabling Castr service for business (${custom_data.business_id})`);
                 }
                 break;
             }
