@@ -428,6 +428,17 @@ class IamportService {
                     // Request I'mport for payment
                     this.iamport.subscribe.again(params)
                         .then((iamport_result) => {
+                            if (iamport_result.status === 'failed') {
+                                params.custom_data = JSON.parse(params.custom_data);
+                                const error = {
+                                    params: params,
+                                    error: {
+                                        code: null,
+                                        message: iamport_result.fail_reason,
+                                    },
+                                };
+                                reject(error); 
+                            }
                             resolve({ data: iamport_result });
                         })
                         .catch((iamport_error) => {
