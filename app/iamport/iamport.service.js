@@ -414,6 +414,7 @@ class IamportService {
                         customer_uid: default_method.customer_uid,
                         name: `${payment_params.business_id}|Castr(${billing_plan_types[payment_params.billing_plan]})|${start.format('M/D')}-${end.format('M/D')}`,
                         amount: payment_params.amount,
+                        cancel_amount: 0,
                         vat: payment_params.vat,
                         custom_data: JSON.stringify({
                             business_id: payment_params.business_id,

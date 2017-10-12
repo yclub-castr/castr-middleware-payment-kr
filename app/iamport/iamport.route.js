@@ -49,21 +49,21 @@ router.post('/:business_id/subscribe', (req, res) => {
 });
 
 /**
- * TODO: Stop next scheduled payment until resumed
+ * Stop next scheduled payment until resumed
  */
 router.post('/:business_id/pause', (req, res) => {
     iamportService.pause(req, res);
 });
 
 /**
- * TODO: Process paused scheduled payment
+ * Process paused scheduled payment
  */
 router.post('/:business_id/resume', (req, res) => {
     iamportService.resume(req, res);
 });
 
 /**
- * TODO: Refund service fee for the current billing cycle (80% of prorated)
+ * Refund service fee for the current billing cycle (80% of prorated)
  */
 router.post('/:business_id/cancel', (req, res) => {
     iamportService.cancel(req, res);
