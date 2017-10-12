@@ -48,7 +48,7 @@ class IamportService {
      */
     checkScheduleAt6AM() {
         const full_day = 24 * 60 * 60 * 1000;
-        const utc_now = moment.tz('UTC');
+        const utc_now = moment.tz(timezone.utc);
         const local_next_morning = moment(utc_now).add(1, 'day').tz(timezone.seoul).hour(6).minute(0).second(0).millisecond(0);
         // Calculate time until next 6 am
         const time_until = local_next_morning.diff(utc_now) % full_day;
@@ -73,7 +73,7 @@ class IamportService {
         // Find all scheduled payments with PENDING status for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
-                status: 'PENDING',
+                status: status_type.pending,
                 schedule: { $lte: moment.tz(timezone.seoul).hour(0).minute(0).second(0).millisecond(0).toDate() },
             },
             (db_error, cursor) => {
@@ -83,7 +83,7 @@ class IamportService {
                         const schedule_params = {
                             business_id: document.business_id,
                             merchant_uid: document.merchant_uid,
-                            type: 'SCHEDULED',
+                            type: payment_type.scheduled,
                             billing_plan: document.billing_plan,
                             pay_date: document.schedule,
                             amount: document.amount,
@@ -308,22 +308,24 @@ class IamportService {
      * @param {*} res 
      */
     setAsDefault(req, res) {
+        const business_id = req.params.business_id;
+        const customer_uid = req.params.customer_uid;
         // Unset the current default method   
         mongoDB.getDB().collection('payment-methods').updateOne(
             {
-                business_id: req.params.business_id,
+                business_id: business_id,
                 default_method: true,
             },
             { $set: { default_method: false } },
             // Set the provided method as the new default
             (unset_db_error, unset_write_result) => {
                 mongoDB.getDB().collection('payment-methods').updateOne(
-                    { customer_uid: req.params.customer_uid },
+                    { customer_uid: customer_uid },
                     { $set: { default_method: true } },
                     (set_db_error, set_write_result) => {
                         // If no payment method found, return error
                         if (set_write_result.matchedCount === 0) {
-                            const msg = `No payment method was found for the given 'customer_uid' (${req.params.customer_uid}).`;
+                            const msg = `No payment method was found for the given 'customer_uid' (${customer_uid}).`;
                             logger.error(msg);
                             res.send({
                                 success: false,
@@ -335,11 +337,36 @@ class IamportService {
                             });
                             return;
                         }
-                        // TODO: If successfully set, see if there is any missed payments
+                        logger.debug(`Business (${business_id}): default pay_method changed to ${customer_uid}`);
+                        // See if there is any failed scheduled payments
+                        mongoDB.getDB().collection('payment-schedule').findOne(
+                            {
+                                business_id: business_id,
+                                status: status_type.failed,
+                            },
+                            (db_error, failed_payment) => {
+                                if (!failed_payment) { return; }
+                                if (db_error) { logger.error(db_error); }
+                                const schedule_params = {
+                                    business_id: failed_payment.business_id,
+                                    merchant_uid: failed_payment.merchant_uid,
+                                    type: payment_type.scheduled,
+                                    billing_plan: failed_payment.billing_plan,
+                                    pay_date: moment().toDate(),
+                                    amount: failed_payment.amount,
+                                    vat: failed_payment.vat,
+                                };
+                                // Make the payment
+                                logger.debug(`[ATTEMPT ${(failed_payment.failures.length + 1)}] Requesting failed scheduled payment (${schedule_params.merchant_uid})`);
+                                this.pay(schedule_params)
+                                    .then(() => { })
+                                    .catch(() => { });
+                            }
+                        );
                         res.send({
                             success: true,
-                            message: `Payment method (${req.params.customer_uid}) has been set as default.`,
-                            data: { customer_uid: req.params.customer_uid },
+                            message: `Payment method (${customer_uid}) has been set as default.`,
+                            data: { customer_uid: customer_uid },
                         });
                     }
                 );
@@ -374,7 +401,7 @@ class IamportService {
         const subscription_params = {
             business_id: business_id,
             merchant_uid: merchant_uid,
-            type: 'INITIAL',
+            type: payment_type.initial,
             billing_plan: billing_plan,
             pay_date: moment().toDate(),
             amount: req.body.amount,
@@ -451,7 +478,7 @@ class IamportService {
                     this.iamport.subscribe.again(params)
                         .then((iamport_result) => {
                             setTimeout(this.paymentHook, 0, iamport_result);
-                            if (iamport_result.status === 'failed') {
+                            if (status_type[iamport_result.status] === status_type.failed) {
                                 const error = {
                                     params: JSON.parse(params.custom_data),
                                     error: {
@@ -539,76 +566,74 @@ class IamportService {
         switch (status) {
             case status_type.paid: {
                 const custom_data = JSON.parse(iamport_result.custom_data);
-                let log_string = `approved & processed (${custom_data.merchant_uid})`;
-                if (custom_data.type === payment_type.scheduled) {
-                    // If payment was a scheduled payment, update the scheduled payments status to PAID
-                    mongoDB.getDB().collection('payment-schedule').updateOne(
-                        { merchant_uid: custom_data.merchant_uid },
-                        { $set: { status: status } },
-                        (db_error, write_result) => {
-                            if (db_error) { logger.error(db_error); }
-                            log_string = `Scheduled payment ${log_string}`;
-                        }
-                    );
-                } else if (custom_data.type === payment_type.initial) {
-                    log_string = `Initial payment ${log_string}`;
-                    // TODO: Enable Castr service
-                    logger.debug(`Enabling Castr service for business (${custom_data.business_id})`);
-                }
+                const log_string = `approved & processed (${custom_data.merchant_uid})`;
                 // Insert payment result to db
-                mongoDB.getDB().collection('payment-transactions').insertOne(
-                    {
-                        business_id: custom_data.business_id,
-                        imp_uid: iamport_result.imp_uid,
-                        merchant_uid: custom_data.merchant_uid,
-                        type: custom_data.type,
-                        name: custom_data.name,
-                        currency: iamport_result.currency,
-                        amount: custom_data.amount,
-                        vat: custom_data.vat,
-                        customer_uid: custom_data.customer_uid,
-                        pay_method: iamport_result.pay_method,
-                        card_name: iamport_result.card_name,
-                        status: status,
-                        receipt_url: iamport_result.receipt_url,
-                        pay_date: custom_data.pay_date,
-                        time_paid: moment(iamport_result.paid_at * 1000).toDate(),
-                    },
-                    (db_error) => {
-                        if (db_error) { logger.error(db_error); }
-                        logger.debug(log_string);
-                    }
-                );
-                // Calculate next pay date
-                const next_pay_date = moment(custom_data.pay_date).tz(timezone.seoul)
-                    .add(billing_plan_type[custom_data.billing_plan], 'week')
-                    .hour(0)
-                    .minute(0)
-                    .second(0)
-                    .millisecond(0);
-                // Insert to payment-schedule collection
-                const next_charge_num = parseInt(custom_data.merchant_uid.match(/\d+$/)[0]) + 1;
-                const next_merchant_uid = `${custom_data.business_id}_ch${next_charge_num}`;
-                mongoDB.getDB().collection('payment-schedule').insertOne(
-                    {
-                        merchant_uid: next_merchant_uid,
-                        business_id: custom_data.business_id,
-                        schedule: next_pay_date.toDate(),
-                        amount: custom_data.amount,
-                        vat: custom_data.vat,
-                        billing_plan: custom_data.billing_plan,
-                        status: status_type.pending,
-                    },
-                    (db_error) => {
-                        if (db_error) { logger.error(db_error); }
-                        logger.debug(`Next payment (${next_merchant_uid}) scheduled for ${next_pay_date.format('LL')}`);
-                    }
-                );
+                mongoDB.getDB().collection('payment-transactions').insertOne({
+                    business_id: custom_data.business_id,
+                    imp_uid: iamport_result.imp_uid,
+                    merchant_uid: custom_data.merchant_uid,
+                    type: custom_data.type,
+                    name: custom_data.name,
+                    currency: iamport_result.currency,
+                    amount: custom_data.amount,
+                    vat: custom_data.vat,
+                    customer_uid: custom_data.customer_uid,
+                    pay_method: iamport_result.pay_method,
+                    card_name: iamport_result.card_name,
+                    status: status,
+                    receipt_url: iamport_result.receipt_url,
+                    pay_date: custom_data.pay_date,
+                    time_paid: moment(iamport_result.paid_at * 1000).toDate(),
+                })
+                    .then((tx_insert_result) => {
+                        if (custom_data.type === payment_type.scheduled) {
+                            // If payment was a scheduled payment, update the scheduled payments status to PAID
+                            mongoDB.getDB().collection('payment-schedule').updateOne(
+                                { merchant_uid: custom_data.merchant_uid },
+                                { $set: { status: status } },
+                                (schedule_update_error, write_result) => {
+                                    if (schedule_update_error) { logger.error(schedule_update_error); }
+                                    logger.debug(`Scheduled payment ${log_string}`);
+                                }
+                            );
+                        } else if (custom_data.type === payment_type.initial) {
+                            logger.debug(`Initial payment ${log_string}`);
+                            // TODO: Enable Castr service
+                            logger.debug(`Enabling Castr service for business (${custom_data.business_id})`);
+                        }
+                    })
+                    .then(() => {
+                        // Calculate next pay date
+                        const next_pay_date = moment(custom_data.pay_date).tz(timezone.seoul)
+                            .add(billing_plan_type[custom_data.billing_plan], 'week')
+                            .hour(0)
+                            .minute(0)
+                            .second(0)
+                            .millisecond(0);
+                        // Insert to payment-schedule collection
+                        const next_charge_num = parseInt(custom_data.merchant_uid.match(/\d+$/)[0]) + 1;
+                        const next_merchant_uid = `${custom_data.business_id}_ch${next_charge_num}`;
+                        mongoDB.getDB().collection('payment-schedule').insertOne(
+                            {
+                                merchant_uid: next_merchant_uid,
+                                business_id: custom_data.business_id,
+                                schedule: next_pay_date.toDate(),
+                                amount: custom_data.amount,
+                                vat: custom_data.vat,
+                                billing_plan: custom_data.billing_plan,
+                                status: status_type.pending,
+                            },
+                            (db_error) => {
+                                if (db_error) { logger.error(db_error); }
+                                logger.debug(`Next payment (${next_merchant_uid}) scheduled for ${next_pay_date.format('LL')}`);
+                            }
+                        );
+                    })
+                    .catch((error) => { logger.error(error); });
                 break;
             }
             case status_type.cancelled: {
                 // TODO: Update database as refunded
-
                 break;
             }
             case status_type.failed: {
@@ -631,14 +656,16 @@ class IamportService {
                                     $sort: { time_failed: -1 },
                                 },
                             },
-                        },
-                        (db_error, write_result) => {
-                            if (db_error) { logger.error(db_error); }
-                            logger.debug(`Scheduled payment (${custom_data.merchant_uid}) rejected`);
                         }
-                    );
-                    // TODO: Disable castr service until failed payment is resolved
-                    logger.debug(`Disabling Castr service for business (${custom_data.business_id})`);
+                    )
+                        .then((write_result) => {
+                            logger.debug(`Scheduled payment (${custom_data.merchant_uid}) rejected`);
+                            // TODO: Disable castr service until failed payment is resolved (Set a different payment method to resolve failed payment)
+                            logger.debug(`Disabling Castr service for business (${custom_data.business_id})`);
+                        })
+                        .catch((db_error) => {
+                            logger.error(db_error);
+                        });
                 }
                 break;
             }
