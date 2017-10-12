@@ -640,6 +640,16 @@ class IamportService {
             }
             case 'cancelled': {
                 // TODO: Update database as refunded
+                // Send email
+                const email = {
+                    from: process.env.FROM_EMAIL_ID,
+                    to: process.env.TO_EMAIL_IDS,
+                    subject: 'Payment Cancelled',
+                    text: JSON.stringify(req.body),
+                };
+                nodemailer.sendMail(email)
+                    .then(info => logger.debug(`Email sent: ${info.response}`))
+                    .catch(mail_error => logger.error(mail_error));
                 break;
             }
             default: {
