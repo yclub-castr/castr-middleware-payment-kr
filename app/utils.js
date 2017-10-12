@@ -34,6 +34,7 @@ moment.locale('kr', {
         return '오후';
     },
 });
+moment.locale('en');
 
 // Nodemailer - email transporter
 const transporter = nodemailer.createTransport({
