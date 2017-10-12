@@ -63,7 +63,9 @@
             {
                 "exceptMethods": [
                     "setAsDefault",
-                    "getHistory"
+                    "getHistory",
+                    "paymentHook",
+                    "_generateName"
                 ]
             }
         ],
