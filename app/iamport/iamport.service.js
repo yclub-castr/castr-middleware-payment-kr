@@ -8,7 +8,10 @@ const moment = require('../utils').moment();
 const nodemailer = require('../utils').nodemailer();
 const Iamport = require('iamport');
 
-const timezone = 'ASIA/SEOUL';
+const timezone = {
+    seoul: 'ASIA/SEOUL',
+    utc: 'UTC',
+};
 
 const billing_plan_type = {
     '4_WEEK': 4,
@@ -46,7 +49,7 @@ class IamportService {
     checkScheduleAt6AM() {
         const full_day = 24 * 60 * 60 * 1000;
         const utc_now = moment.tz('UTC');
-        const local_next_morning = moment(utc_now).add(1, 'day').tz(timezone).hour(6).minute(0).second(0).millisecond(0);
+        const local_next_morning = moment(utc_now).add(1, 'day').tz(timezone.seoul).hour(6).minute(0).second(0).millisecond(0);
         // Calculate time until next 6 am
         const time_until = local_next_morning.diff(utc_now) % full_day;
         // Check for scheduled payments at next 6 am
@@ -62,7 +65,7 @@ class IamportService {
      * This runs daily at 6 am (local time).
      */
     _checkScheduledPayments() {
-        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone).format('ddd, MMM DD, YYYY')}.`);
+        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone.seoul).format('ddd, MMM DD, YYYY')}.`);
         // Result arrays
         const promises = [];
         const successes = [];
@@ -71,7 +74,7 @@ class IamportService {
         mongoDB.getDB().collection('payment-schedule').find(
             {
                 status: 'PENDING',
-                schedule: { $lte: moment.tz(timezone).hour(0).minute(0).second(0).millisecond(0).toDate() },
+                schedule: { $lte: moment.tz(timezone.seoul).hour(0).minute(0).second(0).millisecond(0).toDate() },
             },
             (db_error, cursor) => {
                 cursor.forEach(
@@ -497,11 +500,19 @@ class IamportService {
             { business_id: req.params.business_id },
             (db_error, cursor) => {
                 const methods = [];
-                cursor.forEach(
+                cursor.sort({ time_paid: -1 }).forEach(
                     // Iteration callback
                     (document) => {
-                        document.pay_date_kr = moment(document.pay_date).tz(timezone).format('LL');
-                        document.time_paid_kr = moment(document.time_paid).tz(timezone).format('LL');
+                        document.pay_date = {
+                            date: document.pay_date,
+                            string: moment(document.pay_date).locale('en').tz(timezone.utc).format('LL'),
+                            string_kr: moment(document.pay_date).locale('kr').tz(timezone.seoul).format('LL'),
+                        };
+                        document.time_paid = {
+                            date: document.time_paid,
+                            string: moment(document.time_paid).locale('en').tz(timezone.utc).format('LL'),
+                            string_kr: moment(document.time_paid).locale('kr').tz(timezone.seoul).format('LL'),
+                        };
                         methods.push(document);
                     },
                     // End callback
@@ -515,6 +526,7 @@ class IamportService {
                         });
                     }
                 );
+                // TODO: (FOR UPDATE) Use .limit() & .skip() to implement paging
             }
         );
     }
@@ -556,7 +568,7 @@ class IamportService {
                     time_paid: moment(iamport_result.paid_at * 1000).toDate(),
                 });
                 // Calculate next pay date
-                const next_pay_date = moment(custom_data.pay_date).tz(timezone)
+                const next_pay_date = moment(custom_data.pay_date).tz(timezone.seoul)
                     .add(billing_plan_type[custom_data.billing_plan], 'week')
                     .hour(0)
                     .minute(0)
@@ -632,7 +644,7 @@ class IamportService {
         }
         const billing_plan = params.billing_plan;
         const pay_date = params.pay_date;
-        const start = moment(pay_date).tz(timezone);
+        const start = moment(pay_date).tz(timezone.seoul);
         const end = moment(start).add(billing_plan_type[billing_plan], 'week').subtract(1, 'day');
         return {
             short: `CAS#${business_id}=${start.format('M/D')}-${end.format('M/D')}(${billing_plan_type[billing_plan]}WK)`,
