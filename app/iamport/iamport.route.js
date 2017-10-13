@@ -43,10 +43,14 @@ router.post('/:business_id/payment-method/:customer_uid', (req, res) => {
 /**
  *
  */
-router.post('/:business_id/subscribe', (req, res) => {
-    // Processes a one-time payment with the provided `customer_uid`
-    iamportService.subscribe(req, res);
-});
+router.route('/:business_id/subscription')
+    .post((req, res) => {
+        // Processes a one-time payment with the provided `customer_uid`
+        iamportService.subscribe(req, res);
+    })
+    .put((req, res) => {
+        iamportService.changeSubscription(req, res);
+    });
 
 /**
  * Stop next scheduled payment until resumed

@@ -65,7 +65,8 @@
                     "setAsDefault",
                     "getHistory",
                     "paymentHook",
-                    "_generateName"
+                    "_generateName",
+                    "changeSubscription"
                 ]
             }
         ],

@@ -426,6 +426,58 @@ class IamportService {
             });
     }
 
+    changeSubscription(req, res) {
+        const business_id = req.params.business_id;
+        const new_billing_plan = req.body.billing_plan;
+        const new_amount = req.body.amount;
+        let old_billing_plan;
+        let old_amount;
+        let schedule;
+        mongoDB.getDB().collection('payment-schedule').findOne({
+            business_id: req.params.business_id,
+            status: { $in: [status_type.pending, status_type.failed] },
+        })
+            .then((scheduled_payment) => {
+                if (!scheduled_payment) {
+                    throw Error(`Business (${business_id}) is either invalid, not yet subscribed, or is missing next payment schedule`);
+                }
+                old_billing_plan = scheduled_payment.billing_plan;
+                old_amount = scheduled_payment.amount;
+                schedule = scheduled_payment.schedule;
+                return mongoDB.getDB().collection('payment-schedule').updateOne(
+                    { merchant_uid: scheduled_payment.merchant_uid },
+                    {
+                        $set: {
+                            billing_plan: new_billing_plan,
+                            amount: new_amount,
+                        },
+                    }
+                );
+            })
+            .then((update_result) => {
+                const msg = `Business (${business_id}): Subscription change ${old_billing_plan}(${old_amount}) => ${new_billing_plan}(${new_amount})`;
+                logger.debug(msg);
+                res.send({
+                    success: true,
+                    message: msg,
+                    data: {
+                        business_id: business_id,
+                        schedule: schedule,
+                        old_billing_plan: old_billing_plan,
+                        new_billing_plan: new_billing_plan,
+                    },
+                });
+            })
+            .catch((error) => {
+                logger.error(error.message);
+                res.send({
+                    success: false,
+                    message: error.message,
+                    error: error,
+                });
+            });
+    }
+
     /**
      * Processes a one-time payment using the default payment method set for the business (payment_params.business_id).
      * 
