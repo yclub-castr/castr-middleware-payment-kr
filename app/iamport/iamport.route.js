@@ -69,8 +69,8 @@ router.post('/:business_id/resume', (req, res) => {
 /**
  * Refund service fee for the current billing cycle (80% of prorated)
  */
-router.post('/:business_id/cancel', (req, res) => {
-    iamportService.cancel(req, res);
+router.post('/:business_id/refund', (req, res) => {
+    iamportService.refund(req, res);
 });
 
 /*

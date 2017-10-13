@@ -567,8 +567,13 @@ class IamportService {
         logger.debug('resume invoked.');
     }
 
-    cancel(req, res) {
-        logger.debug('cancel invoked.');
+    refund(req, res) {
+        logger.debug('refund invoked.');
+        // Fetch the latest subscription object (SCHEDULE)
+        // Calculate how much time has passed since the last payment
+        // Calculate the ratio, PRORATE = {time_passed_since_last_paid} / {billing_plan}
+        // (1 - PRORATE) is the {%service_not_yet_received}
+        // Refund 80% of {%service_not_yet_received}, (20% is cancellation fee)
     }
 
     /**
