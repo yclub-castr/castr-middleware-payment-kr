@@ -877,6 +877,7 @@ class IamportService {
     }
 
     mcPaymentHook(req) {
+        logger.debug(req.body.merchant_uid.substring(0, 3));
         // Ditch non-MC notifications
         if (req.body.merchant_uid.substring(0, 3) !== 'mc_') { return; }
         // Fetch the transaction
