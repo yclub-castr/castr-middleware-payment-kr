@@ -81,9 +81,9 @@ router.get('/:business_id/history', (req, res) => {
 });
 
 router.route('/payment-hook')
-    .post((req, res) => {
+    .post((req) => {
         // This endpoint will be reserved for Iamport to send success/failure result on payment transactions
-        iamportService.mcPaymentHook(req, res);
+        iamportService.mcPaymentHook(req);
     });
 
 module.exports = router;

@@ -876,26 +876,44 @@ class IamportService {
         }
     }
 
-    mcPaymentHook(mc_iamport_result) {
-        const custom_data = JSON.parse(mc_iamport_result.custom_data);
-        const type = payment_type[custom_data.type];
-        const status = status_type[mc_iamport_result.status];
-        if (type === payment_type.menucast && status === status_type.paid) {
-            // Insert payment result to db
-            mongoDB.getDB().collection('mc-payment-transactions').insertOne({
-                business_id: custom_data.business_id,
-                merchant_uid: mc_iamport_result.merchant_uid,
-                type: type,
-                name: custom_data.name,
-                currency: mc_iamport_result.currency,
-                amount: mc_iamport_result.amount,
-                pay_method: mc_iamport_result.pay_method,
-                card_name: mc_iamport_result.card_name,
-                status: status,
-                receipt_url: mc_iamport_result.receipt_url,
-                time_paid: moment(mc_iamport_result.paid_at * 1000).toDate(),
+    mcPaymentHook(req) {
+        // Ditch non-MC notifications
+        if (req.body.merchant_uid.substring(0, 3) !== 'mc_') { return; }
+        // Fetch the transaction
+        const params = { imp_uid: req.body.imp_uid };
+        this.iamport.payment.getByImpUid(params)
+            .then((mc_iamport_result) => {
+                const custom_data = JSON.parse(mc_iamport_result.custom_data);
+                const type = payment_type[custom_data.type];
+                const status = status_type[mc_iamport_result.status];
+                if (type === payment_type.menucast && status === status_type.paid) {
+                    // Insert payment result to db
+                    mongoDB.getDB().collection('mc-payment-transactions').insertOne({
+                        business_id: custom_data.business_id,
+                        merchant_uid: mc_iamport_result.merchant_uid,
+                        type: type,
+                        name: custom_data.name,
+                        currency: mc_iamport_result.currency,
+                        amount: mc_iamport_result.amount,
+                        pay_method: mc_iamport_result.pay_method,
+                        card_name: mc_iamport_result.card_name,
+                        status: status,
+                        receipt_url: mc_iamport_result.receipt_url,
+                        time_paid: moment(mc_iamport_result.paid_at * 1000).toDate(),
+                    });
+                }
+            })
+            .catch((iamport_error) => {
+                const error = {
+                    message: 'Look up by \'imp_uid\' failed.',
+                    params: params,
+                    error: {
+                        code: iamport_error.code,
+                        message: iamport_error.message,
+                    },
+                };
+                logger.error(error);
             });
-        }
     }
 
     /**
