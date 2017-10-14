@@ -9,7 +9,7 @@ const nodemailer = require('../utils').nodemailer();
 const Iamport = require('iamport');
 
 const timezone = {
-    seoul: 'ASIA/SEOUL',
+    kr: 'ASIA/SEOUL',
     utc: 'UTC',
 };
 
@@ -29,8 +29,12 @@ const status_type = {
     paid: 'PAID',
     cancelled: 'REFUNDED',
     failed: 'FAILED',
-    pending: 'PENDING',
+    scheduled: 'SCHEDULED',
 };
+
+const full_day = 24 * 60 * 60 * 1000;
+
+const refund_fee_perc = 0.2;
 
 class IamportService {
     /**
@@ -47,9 +51,8 @@ class IamportService {
      * Triggers checking payment schedules at 6 am everyday (local time).
      */
     checkScheduleAt6AM() {
-        const full_day = 24 * 60 * 60 * 1000;
         const utc_now = moment.tz(timezone.utc);
-        const local_next_morning = moment(utc_now).add(1, 'day').tz(timezone.seoul).hour(6).minute(0).second(0).millisecond(0);
+        const local_next_morning = moment(utc_now).tz(timezone.kr).add(1, 'day').hour(6).minute(0).second(0).millisecond(0);
         // Calculate time until next 6 am
         const time_until = local_next_morning.diff(utc_now) % full_day;
         // Check for scheduled payments at next 6 am
@@ -65,7 +68,7 @@ class IamportService {
      * This runs daily at 6 am (local time).
      */
     _checkScheduledPayments() {
-        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone.seoul).format('LL')}.`);
+        logger.debug(`Checking for payments scheduled on ${moment.tz(timezone.kr).format('LL')}.`);
         // Result arrays
         const promises = [];
         const successes = [];
@@ -73,8 +76,8 @@ class IamportService {
         // Find all scheduled payments with PENDING status for today and before
         mongoDB.getDB().collection('payment-schedule').find(
             {
-                status: status_type.pending,
-                schedule: { $lte: moment.tz(timezone.seoul).hour(0).minute(0).second(0).millisecond(0).toDate() },
+                status: status_type.scheduled,
+                schedule: { $lte: moment.tz(timezone.kr).hour(0).minute(0).second(0).millisecond(0).toDate() },
             },
             (db_error, cursor) => {
                 cursor.forEach(
@@ -435,7 +438,7 @@ class IamportService {
         let schedule;
         mongoDB.getDB().collection('payment-schedule').findOne({
             business_id: req.params.business_id,
-            status: { $in: [status_type.pending, status_type.failed] },
+            status: { $in: [status_type.scheduled, status_type.failed] },
         })
             .then((scheduled_payment) => {
                 if (!scheduled_payment) {
@@ -568,13 +571,98 @@ class IamportService {
     }
 
     refund(req, res) {
-        logger.debug('refund invoked.');
-        // Fetch the latest subscription object (SCHEDULE)
-        // Calculate how much time has passed since the last payment
-        // Calculate the ratio, PRORATE = {time_passed_since_last_paid} / {billing_plan}
-        // (1 - PRORATE) is the {%service_not_yet_received}
-        // Refund 80% of {%service_not_yet_received}, (20% is cancellation fee)
-        
+        const business_id = req.params.business_id;
+        let schedule_id;
+        // Fetch the last paid subscription object (PAID)
+        mongoDB.getDB().collection('payment-schedule').find(
+            { business_id: business_id },
+            (db_error, cursor) => {
+                if (db_error) {
+                    logger.error(`${db_error}`);
+                    return;
+                }
+                cursor.sort({ schedule: -1 }).limit(2).next()
+                    // Fetch latest schedule
+                    .then((last_scheduled) => {
+                        // If never subscribed, abort
+                        if (last_scheduled === null) { throw Error('No subcription data found for the business.'); }
+                        const last_status = last_scheduled.status;
+                        // If last payment failed or already refunded, abort
+                        if ([status_type.failed, status_type.cancelled].includes(last_status)) {
+                            throw Error('Nothing to refund for the business.');
+                        }
+                        // This shouldn't happen, abort
+                        if (!cursor.hasNext()) { throw Error('Found a schedule but missing any payment.'); }
+                        schedule_id = last_scheduled.merchant_uid;
+                        return cursor.next();
+                    })
+                    // Fetch last payment
+                    .then((last_paid) => {
+                        // This shouldn't happen, abort
+                        if (last_paid.status !== status_type.paid) { throw Error('Second to last schedule obj was not processed.'); }
+                        // Calculate how much time has passed since the last payment
+                        const plan_value = last_paid.amount;
+                        const tmr = moment.tz(timezone.kr).add(1, 'day').hour(0).minute(0).second(0).millisecond(0);
+                        const date_last_paid = moment(last_paid.schedule).tz(timezone.kr).hour(0).minute(0).second(0).millisecond(0);
+                        const plan_time = billing_plan_type[last_paid.billing_plan] * 7 * full_day;
+                        const time_served = tmr.diff(date_last_paid);
+                        // Calculate prorated refund amount [80% of {value_unserved}]
+                        const perc_served = time_served / plan_time;
+                        const value_unserved = (1 - perc_served) * plan_value;
+                        const rf_val = (value_unserved * (1 - refund_fee_perc)).toFixed(0);
+                        // Prepare msg
+                        const plan_str = `\n - Plan: ${last_paid.billing_plan} (${plan_value})`;
+                        const serv_str = `\n - Days served: ${(time_served / full_day).toFixed(0)} (${perc_served.toFixed(2)}%)`;
+                        const unserv_str = `\n - Value unserved: ${value_unserved.toFixed(0)}`;
+                        const fee_str = `\n - Cancellation fee: -${(value_unserved * refund_fee_perc).toFixed(0)}`;
+                        const rfval_str = `\n - Refund value: ${rf_val}`;
+                        logger.debug(`Refund request from business (#${business_id}):${plan_str}${serv_str}${unserv_str}${fee_str}${rfval_str}`);
+                        return {
+                            merchant_uid: last_paid.merchant_uid,
+                            amount: rf_val,
+                        };
+                    })
+                    .then((refund) => {
+                        // Refund the prorated amount
+                        const params = {
+                            merchant_uid: refund.merchant_uid,
+                            amount: refund.amount,
+                            reason: 'Castr user refund request',
+                        };
+                        return this.iamport.payment.cancel(params);
+                    })
+                    .then((iamport_result) => {
+                        setTimeout(this.paymentHook, 0, iamport_result);
+                        if (status_type[iamport_result.status] === status_type.failed) {
+                            const error = {
+                                success: false,
+                                message: iamport_result.fail_reason,
+                                error: {
+                                    code: null,
+                                    message: iamport_result.fail_reason,
+                                },
+                            };
+                            res.send(error);
+                        }
+                        res.send({
+                            success: true
+                        });
+                    })
+                    .catch((err) => {
+                        const error = {
+                            success: false,
+                            message: err.message,
+                            params: { business_id: business_id },
+                            error: {
+                                code: err.code || 'castr_payment_error',
+                                message: err.message,
+                            },
+                        };
+                        logger.error(error);
+                        res.send(error);
+                    });
+            }
+        );
     }
 
     /**
@@ -593,13 +681,13 @@ class IamportService {
                     (document) => {
                         document.pay_date = {
                             date: document.pay_date,
-                            string: moment(document.pay_date).tz(timezone.utc).format('LL'),
-                            string_kr: moment(document.pay_date).locale('kr').tz(timezone.seoul).format('LL'),
+                            string: moment(document.pay_date).tz(timezone.kr).format('LL'),
+                            string_kr: moment(document.pay_date).locale('kr').tz(timezone.kr).format('LL'),
                         };
                         document.time_paid = {
                             date: document.time_paid,
-                            string: moment(document.time_paid).tz(timezone.utc).format('LL'),
-                            string_kr: moment(document.time_paid).locale('kr').tz(timezone.seoul).format('LL'),
+                            string: moment(document.time_paid).tz(timezone.kr).format('LL'),
+                            string_kr: moment(document.time_paid).locale('kr').tz(timezone.kr).format('LL'),
                         };
                         methods.push(document);
                     },
@@ -662,7 +750,7 @@ class IamportService {
                     })
                     .then(() => {
                         // Calculate next pay date
-                        const next_pay_date = moment(custom_data.pay_date).tz(timezone.seoul)
+                        const next_pay_date = moment(custom_data.pay_date).tz(timezone.kr)
                             .add(billing_plan_type[custom_data.billing_plan], 'week')
                             .hour(0)
                             .minute(0)
@@ -679,7 +767,7 @@ class IamportService {
                                 amount: custom_data.amount,
                                 vat: custom_data.vat,
                                 billing_plan: custom_data.billing_plan,
-                                status: status_type.pending,
+                                status: status_type.scheduled,
                             },
                             (db_error) => {
                                 if (db_error) { logger.error(db_error); }
@@ -749,7 +837,7 @@ class IamportService {
         }
         const billing_plan = params.billing_plan;
         const pay_date = params.pay_date;
-        const start = moment(pay_date).tz(timezone.seoul);
+        const start = moment(pay_date).tz(timezone.kr);
         const end = moment(start).add(billing_plan_type[billing_plan], 'week').subtract(1, 'day');
         return {
             short: `CAS#${business_id}=${start.format('M/D')}-${end.format('M/D')}(${billing_plan_type[billing_plan]}WK)`,

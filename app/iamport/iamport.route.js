@@ -49,7 +49,12 @@ router.route('/:business_id/subscription')
         iamportService.subscribe(req, res);
     })
     .put((req, res) => {
+        // Change subscription billing plan
         iamportService.changeSubscription(req, res);
+    })
+    .delete((req, res) => {
+        // Refund service fee for the current billing cycle (80% of prorated)
+        iamportService.refund(req, res);
     });
 
 /**
@@ -64,13 +69,6 @@ router.post('/:business_id/pause', (req, res) => {
  */
 router.post('/:business_id/resume', (req, res) => {
     iamportService.resume(req, res);
-});
-
-/**
- * Refund service fee for the current billing cycle (80% of prorated)
- */
-router.post('/:business_id/refund', (req, res) => {
-    iamportService.refund(req, res);
 });
 
 /*
