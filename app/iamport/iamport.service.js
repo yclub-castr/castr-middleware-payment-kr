@@ -880,6 +880,8 @@ class IamportService {
         logger.debug(req.body.merchant_uid.substring(0, 3));
         // Ditch non-MC notifications
         if (req.body.merchant_uid.substring(0, 3) !== 'mc_') { return; }
+
+        logger.debug(req.body);
         // Fetch the transaction
         const params = { imp_uid: req.body.imp_uid };
         this.iamport.payment.getByImpUid(params)
