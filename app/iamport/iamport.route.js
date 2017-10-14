@@ -49,7 +49,12 @@ router.route('/:business_id/subscription')
         iamportService.subscribe(req, res);
     })
     .put((req, res) => {
+        // Change subscription billing plan
         iamportService.changeSubscription(req, res);
+    })
+    .delete((req, res) => {
+        // Refund service fee for the current billing cycle (80% of prorated)
+        iamportService.refund(req, res);
     });
 
 /**
@@ -66,13 +71,6 @@ router.post('/:business_id/resume', (req, res) => {
     iamportService.resume(req, res);
 });
 
-/**
- * Refund service fee for the current billing cycle (80% of prorated)
- */
-router.post('/:business_id/refund', (req, res) => {
-    iamportService.refund(req, res);
-});
-
 /*
  * Use the business_id (formerly restaurant_id) for the `merchant_uid`.
  * This will retrieve all the transaction history for a specific `merchant_uid` (which is mapped to a specific business).
@@ -83,9 +81,9 @@ router.get('/:business_id/history', (req, res) => {
 });
 
 router.route('/payment-hook')
-    .post((req, res) => {
+    .post((req) => {
         // This endpoint will be reserved for Iamport to send success/failure result on payment transactions
-        iamportService.paymentHook(req, res);
+        iamportService.mcPaymentHook(req);
     });
 
 module.exports = router;
