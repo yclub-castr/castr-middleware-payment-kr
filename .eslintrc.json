@@ -69,7 +69,8 @@
                     "changeSubscription",
                     "refund",
                     "pause",
-                    "resume"
+                    "resume",
+                    "mcPaymentHook"
                 ]
             }
         ],

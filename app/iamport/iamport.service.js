@@ -23,6 +23,7 @@ const payment_type = {
     initial: 'INITIAL',
     scheduled: 'SCHEDULED',
     refund: 'REFUND',
+    menucast: 'MC',
 };
 
 const status_type = {
@@ -30,6 +31,7 @@ const status_type = {
     cancelled: 'REFUNDED',
     failed: 'FAILED',
     scheduled: 'SCHEDULED',
+    unscheduled: 'CANCELLED',
 };
 
 const full_day = 24 * 60 * 60 * 1000;
@@ -413,8 +415,8 @@ class IamportService {
         // Process initial payment
         this.pay(subscription_params)
             .then((result) => {
-                const msg = `Initial payment requested (${merchant_uid}: ${result.data.amount} ${result.data.currency})`;
-                logger.debug(msg);
+                const msg = `Initial payment sccuessful (${merchant_uid})`;
+                logger.debug(`Enabling Castr service for business (${business_id})`);
                 res.send({
                     success: true,
                     message: msg,
@@ -422,7 +424,7 @@ class IamportService {
                 });
             })
             .catch((error) => {
-                error.message = `Initial payment request failed (${merchant_uid}: ${error.params.amount})`;
+                error.message = `Initial payment failed (${merchant_uid})`;
                 logger.error(error);
                 error.success = false;
                 res.send(error);
@@ -514,7 +516,6 @@ class IamportService {
                         customer_uid: default_method.customer_uid,
                         name: name.short,
                         amount: payment_params.amount,
-                        cancel_amount: payment_params.amount,
                         vat: payment_params.vat,
                         custom_data: JSON.stringify({
                             business_id: payment_params.business_id,
@@ -525,7 +526,6 @@ class IamportService {
                             billing_plan: payment_params.billing_plan,
                             pay_date: payment_params.pay_date,
                             amount: payment_params.amount,
-                            cancel_amount: payment_params.amount,
                             vat: payment_params.vat,
                         }),
                     };
@@ -566,6 +566,11 @@ class IamportService {
         logger.debug('pause invoked.');
     }
 
+    /**
+     * TODO: 
+     * @param {*} req 
+     * @param {*} res 
+     */
     resume(req, res) {
         logger.debug('resume invoked.');
     }
@@ -599,7 +604,7 @@ class IamportService {
                     // Fetch last payment
                     .then((last_paid) => {
                         // This shouldn't happen, abort
-                        if (last_paid.status !== status_type.paid) { throw Error('Second to last schedule obj was not processed.'); }
+                        if (last_paid.status !== status_type.paid) { throw Error('[POSSIBLE DUPLICATE SCHEDULE] Second to last schedule obj was not processed.'); }
                         // Calculate how much time has passed since the last payment
                         const plan_value = last_paid.amount;
                         const tmr = moment.tz(timezone.kr).add(1, 'day').hour(0).minute(0).second(0).millisecond(0);
@@ -645,8 +650,20 @@ class IamportService {
                             res.send(error);
                         }
                         res.send({
-                            success: true
+                            success: true,
+                            message: `Refund for previous payment (#${iamport_result.merchant_uid}) successful.`,
+                            data: {
+                                refund_amount: iamport_result.cancel_amount,
+                                refund_reason: iamport_result.cancel_history.reason,
+                            },
                         });
+                    })
+                    .then(() => {
+                        // Cancel the latest schedule
+                        mongoDB.getDB().collection('payment-schedule').updateOne(
+                            { merchant_uid: schedule_id },
+                            { $set: { status: status_type.unscheduled } }
+                        );
                     })
                     .catch((err) => {
                         const error = {
@@ -712,7 +729,7 @@ class IamportService {
         switch (status) {
             case status_type.paid: {
                 const custom_data = JSON.parse(iamport_result.custom_data);
-                const log_string = `approved & processed (${custom_data.merchant_uid})`;
+                let log_string = `approved & processed (${custom_data.merchant_uid})`;
                 // Insert payment result to db
                 mongoDB.getDB().collection('payment-transactions').insertOne({
                     business_id: custom_data.business_id,
@@ -733,22 +750,30 @@ class IamportService {
                 })
                     .then((tx_insert_result) => {
                         if (custom_data.type === payment_type.scheduled) {
+                            log_string = `Scheduled payment ${log_string}`;
                             // If payment was a scheduled payment, update the scheduled payments status to PAID
-                            mongoDB.getDB().collection('payment-schedule').updateOne(
+                            return mongoDB.getDB().collection('payment-schedule').updateOne(
                                 { merchant_uid: custom_data.merchant_uid },
-                                { $set: { status: status } },
-                                (schedule_update_error, write_result) => {
-                                    if (schedule_update_error) { logger.error(schedule_update_error); }
-                                    logger.debug(`Scheduled payment ${log_string}`);
-                                }
+                                { $set: { status: status } }
                             );
-                        } else if (custom_data.type === payment_type.initial) {
-                            logger.debug(`Initial payment ${log_string}`);
-                            // TODO: Enable Castr service
-                            logger.debug(`Enabling Castr service for business (${custom_data.business_id})`);
                         }
+                        if (custom_data.type === payment_type.initial) {
+                            log_string = `Initial payment ${log_string}`;
+                            return mongoDB.getDB().collection('payment-schedule').insertOne({
+                                merchant_uid: custom_data.merchant_uid,
+                                business_id: custom_data.business_id,
+                                schedule: moment(custom_data.pay_date).toDate(),
+                                amount: custom_data.amount,
+                                vat: custom_data.vat,
+                                billing_plan: custom_data.billing_plan,
+                                status: status_type.paid,
+                            });
+                        }
+                        // Shouldn't happen
+                        throw new Error(`Unhandled payment type ${custom_data.type}`);
                     })
                     .then(() => {
+                        logger.debug(log_string);
                         // Calculate next pay date
                         const next_pay_date = moment(custom_data.pay_date).tz(timezone.kr)
                             .add(billing_plan_type[custom_data.billing_plan], 'week')
@@ -775,11 +800,37 @@ class IamportService {
                             }
                         );
                     })
-                    .catch((error) => { logger.error(error); });
+                    .catch((error) => {
+                        logger.error({
+                            error: {
+                                code: error.code,
+                                message: error.message,
+                            },
+                        });
+                    });
                 break;
             }
             case status_type.cancelled: {
-                // TODO: Update database as refunded
+                const custom_data = JSON.parse(iamport_result.custom_data);
+                // Update the payment as refunded
+                mongoDB.getDB().collection('payment-transactions').updateOne(
+                    { merchant_uid: custom_data.merchant_uid },
+                    {
+                        status: status,
+                        refund_amount: iamport_result.cancel_amount,
+                        refund_reason: iamport_result.cancel_history.reason,
+                        time_refunded: moment(iamport_result.cancelled_at * 1000).toDate(),
+                    }
+                )
+                    .then(() => { logger.debug(`Refund processed (${custom_data.merchant_uid})`); })
+                    .catch((error) => {
+                        logger.error({
+                            error: {
+                                code: error.code,
+                                message: error.message,
+                            },
+                        });
+                    });
                 break;
             }
             case status_type.failed: {
@@ -804,9 +855,13 @@ class IamportService {
                             },
                         }
                     )
-                        .then((write_result) => {
+                        .then(() => {
                             logger.debug(`Scheduled payment (${custom_data.merchant_uid}) rejected`);
-                            // TODO: Disable castr service until failed payment is resolved (Set a different payment method to resolve failed payment)
+                            /*
+                             * TODO: Disable castr service until failed payment is resolved 
+                             * - Todo: Should implement a webhook to call Castr server to stop service
+                             * - Note: Setting a different payment method will retry the failed payment
+                             */
                             logger.debug(`Disabling Castr service for business (${custom_data.business_id})`);
                         })
                         .catch((db_error) => {
@@ -818,6 +873,28 @@ class IamportService {
             default: {
                 logger.debug(`Default block reached with:\n${iamport_result}`);
             }
+        }
+    }
+
+    mcPaymentHook(mc_iamport_result) {
+        const custom_data = JSON.parse(mc_iamport_result.custom_data);
+        const type = payment_type[custom_data.type];
+        const status = status_type[mc_iamport_result.status];
+        if (type === payment_type.menucast && status === status_type.paid) {
+            // Insert payment result to db
+            mongoDB.getDB().collection('mc-payment-transactions').insertOne({
+                business_id: custom_data.business_id,
+                merchant_uid: mc_iamport_result.merchant_uid,
+                type: type,
+                name: custom_data.name,
+                currency: mc_iamport_result.currency,
+                amount: mc_iamport_result.amount,
+                pay_method: mc_iamport_result.pay_method,
+                card_name: mc_iamport_result.card_name,
+                status: status,
+                receipt_url: mc_iamport_result.receipt_url,
+                time_paid: moment(mc_iamport_result.paid_at * 1000).toDate(),
+            });
         }
     }
 
