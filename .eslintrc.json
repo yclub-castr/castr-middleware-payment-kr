@@ -70,7 +70,8 @@
                     "refund",
                     "pause",
                     "resume",
-                    "mcPaymentHook"
+                    "mcPaymentHook",
+                    "savePaymentMethod"
                 ]
             }
         ],

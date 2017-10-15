@@ -25,13 +25,20 @@ router.get('/:business_id', (req, res) => {
 router.route('/:business_id/payment-method')
     .post((req, res) => {
         // Creates a customer (single payment method) using the provided 'customer_uid'
-        iamportService.createPaymentMethod(req, res);
+        iamportService.savePaymentMethod(req, res);
     })
     .delete((req, res) => {
         // Uses 'customer_uid' to delete the payment method
         iamportService.deletePaymentMethod(req, res);
     });
 
+/**
+ * Used for internal testing.
+ */
+router.post('/:business_id/payment-method/create', (req, res) => {
+    // Creates a customer (single payment method) using the provided 'customer_uid'
+    iamportService.createPaymentMethod(req, res);
+});
 
 /**
  * Set the payment method as the default for this business.

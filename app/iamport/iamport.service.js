@@ -232,26 +232,6 @@ class IamportService {
             customer_postcode: req.body.customer_postcode,
         })
             .then((iamport_result) => {
-                logger.debug(`Succesfully registered payment method (${iamport_result.customer_uid}) with I'mport.`);
-                // Update this payment method to the business account in castrDB
-                mongoDB.getDB().collection('payment-methods').updateOne(
-                    {
-                        business_id: business_id,
-                        customer_uid: iamport_result.customer_uid,
-                    },
-                    {
-                        $setOnInsert: {
-                            business_id: business_id,
-                            created_time: new Date(),
-                        },
-                        $set: {
-                            customer_uid: iamport_result.customer_uid,
-                            default_method: false,
-                            updated_time: new Date(),
-                        },
-                    },
-                    { upsert: true }
-                );
                 res.send({
                     success: true,
                     message: `New payment method (${iamport_result.customer_uid}) has been created.`,
@@ -259,6 +239,7 @@ class IamportService {
                 });
             }).catch((iamport_error) => {
                 const error = {
+                    success: false,
                     message: 'Something went wrong with I\'mport while registering new payment method.',
                     params: {
                         business_id: business_id,
@@ -267,6 +248,53 @@ class IamportService {
                     error: {
                         code: iamport_error.code,
                         message: iamport_error.message,
+                    },
+                };
+                res.send(error);
+            });
+    }
+
+    savePaymentMethod(req, res) {
+        const business_id = req.params.business_id;
+        const customer_uid = req.body.customer_uid;
+        const is_default = req.body.is_default;
+        // Update this payment method to the business account in castrDB
+        mongoDB.getDB().collection('payment-methods').updateOne(
+            {
+                business_id: business_id,
+                customer_uid: customer_uid,
+            },
+            {
+                $setOnInsert: {
+                    business_id: business_id,
+                    created_time: new Date(),
+                },
+                $set: {
+                    customer_uid: customer_uid,
+                    default_method: is_default,
+                    updated_time: new Date(),
+                },
+            },
+            { upsert: true }
+        )
+            .then((write_result) => {
+                res.send({
+                    success: true,
+                    message: `Payment method (${customer_uid}) has been saved to DB.`,
+                    data: write_result,
+                });
+            })
+            .catch((err) => {
+                const error = {
+                    message: 'Encountered error while upserting to payment-method',
+                    params: {
+                        business_id: business_id,
+                        customer_uid: customer_uid,
+                        is_default: is_default,
+                    },
+                    error: {
+                        code: err.code || 'castr_payment_error',
+                        message: err.message,
                     },
                 };
                 logger.error(error);
@@ -749,14 +777,15 @@ class IamportService {
                     time_paid: moment(iamport_result.paid_at * 1000).toDate(),
                 })
                     .then((tx_insert_result) => {
+                        // If payment was a scheduled payment, update the payment's scheduled status to PAID
                         if (custom_data.type === payment_type.scheduled) {
                             log_string = `Scheduled payment ${log_string}`;
-                            // If payment was a scheduled payment, update the scheduled payments status to PAID
                             return mongoDB.getDB().collection('payment-schedule').updateOne(
                                 { merchant_uid: custom_data.merchant_uid },
                                 { $set: { status: status } }
                             );
                         }
+                        // If payment was an initial payment, insert the payment schedule with PAID status
                         if (custom_data.type === payment_type.initial) {
                             log_string = `Initial payment ${log_string}`;
                             return mongoDB.getDB().collection('payment-schedule').insertOne({
@@ -786,13 +815,14 @@ class IamportService {
                         const next_merchant_uid = `${custom_data.business_id}_ch${next_charge_num}`;
                         mongoDB.getDB().collection('payment-schedule').insertOne(
                             {
+                                schedule: next_pay_date.toDate(),
                                 merchant_uid: next_merchant_uid,
                                 business_id: custom_data.business_id,
-                                schedule: next_pay_date.toDate(),
+                                billing_plan: custom_data.billing_plan,
                                 amount: custom_data.amount,
                                 vat: custom_data.vat,
-                                billing_plan: custom_data.billing_plan,
                                 status: status_type.scheduled,
+                                time_scheduled: moment().toDate(),
                             },
                             (db_error) => {
                                 if (db_error) { logger.error(db_error); }
