@@ -71,7 +71,8 @@
                     "pause",
                     "resume",
                     "mcPaymentHook",
-                    "savePaymentMethod"
+                    "savePaymentMethod",
+                    "getPlan"
                 ]
             }
         ],

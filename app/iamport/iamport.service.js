@@ -125,6 +125,88 @@ class IamportService {
     }
 
     /**
+     * Retrieve business plan information.
+     * @param {*} req 
+     * @param {*} res 
+     */
+    getPlan(req, res) {
+        mongoDB.getDB().collection('payment-schedule').find(
+            { business_id: req.params.business_id },
+            (db_error, cursor) => {
+                if (db_error) {
+                    logger.error(`${db_error}`);
+                    return;
+                }
+                const response = {
+                    success: true,
+                    message: null,
+                    data: {
+                        plan: null,
+                        plan_status: null,
+                        billing_date: null,
+                        billing_amount: null,
+                        next_plan: null,
+                        next_plan_status: null,
+                        next_billing_date: null,
+                        next_billing_amount: null,
+                    },
+                };
+                cursor.sort({ schedule: -1 }).limit(2).next()
+                    // Fetch latest schedule
+                    .then((last_scheduled) => {
+                        // If never subscribed, abort
+                        if (!last_scheduled) {
+                            response.message = 'No subcription data found for the business.';
+                            return res.send(response);
+                        }
+                        // This shouldn't happen, abort
+                        if (!cursor.hasNext()) { throw Error('Found a schedule but missing any payment.'); }
+                        const last_status = last_scheduled.status;
+                        // If last payment failed
+                        if (last_status === status_type.failed) {
+                            response.message = 'Subscription not active for the business.';
+                            response.data.plan_status = last_status;
+                            response.data.fail_reason = last_scheduled.failures[last_scheduled.failures.length - 1].reason;
+                            response.data.plan = last_scheduled.billing_plan;
+                            response.data.billing_date = last_scheduled.schedule;
+                            response.data.billing_amount = last_scheduled.amount;
+                            res.send(response);
+                            return null;
+                        }
+                        // If last payment already refunded
+                        if (last_status === status_type.unscheduled) {
+                            response.message = 'Subscription not active for the business.';
+                        }
+                        // Include next plan details
+                        response.data.next_plan_status = last_status;
+                        response.data.next_plan = last_scheduled.billing_plan;
+                        response.data.next_billing_date = last_scheduled.schedule;
+                        response.data.next_billing_amount = last_scheduled.amount;
+                        return cursor.next();
+                    })
+                    .then((last_paid) => {
+                        // Handle inactive subscription
+                        if (!last_paid) { return; }
+                        // This shouldn't happen, abort
+                        if (![status_type.paid, status_type.cancelled].includes(last_paid.status)) { throw Error('[POSSIBLE DUPLICATE SCHEDULE] Second to last schedule obj was not processed.'); }
+                        // Include current plan details and respond
+                        response.data.plan_status = last_paid.status;
+                        response.data.plan = last_paid.billing_plan;
+                        response.data.billing_date = last_paid.schedule;
+                        response.data.billing_amount = last_paid.amount;
+                        res.send(response);
+                    })
+                    .catch((err) => {
+                        res.send({
+                            success: false,
+                            message: err.message,
+                        });
+                    });
+            }
+        );
+    }
+
+    /**
      * Fetches all payment methods ('customer_uid') for the business ('business_id').
      * @param {*} req 
      * @param {*} res 
@@ -399,7 +481,7 @@ class IamportService {
                         res.send({
                             success: true,
                             message: `Payment method (${customer_uid}) has been set as default.`,
-                            data: { customer_uid: customer_uid },
+                            data: null,
                         });
                     }
                 );
@@ -621,7 +703,7 @@ class IamportService {
                         if (last_scheduled === null) { throw Error('No subcription data found for the business.'); }
                         const last_status = last_scheduled.status;
                         // If last payment failed or already refunded, abort
-                        if ([status_type.failed, status_type.cancelled].includes(last_status)) {
+                        if ([status_type.failed, status_type.unscheduled].includes(last_status)) {
                             throw Error('Nothing to refund for the business.');
                         }
                         // This shouldn't happen, abort
@@ -656,6 +738,17 @@ class IamportService {
                         };
                     })
                     .then((refund) => {
+                        // Cancel the latest schedule
+                        mongoDB.getDB().collection('payment-schedule').updateOne(
+                            { merchant_uid: schedule_id },
+                            { $set: { status: status_type.unscheduled } },
+                            (err, write_result) => {
+                                logger.debug(`Cancelled payment schedule (#${schedule_id})`);
+                            }
+                        );
+                        return refund;
+                    })
+                    .then((refund) => {
                         // Refund the prorated amount
                         const params = {
                             merchant_uid: refund.merchant_uid,
@@ -686,16 +779,8 @@ class IamportService {
                             },
                         });
                     })
-                    .then(() => {
-                        // Cancel the latest schedule
-                        mongoDB.getDB().collection('payment-schedule').updateOne(
-                            { merchant_uid: schedule_id },
-                            { $set: { status: status_type.unscheduled } }
-                        );
-                    })
                     .catch((err) => {
                         const error = {
-                            success: false,
                             message: err.message,
                             params: { business_id: business_id },
                             error: {
@@ -704,6 +789,7 @@ class IamportService {
                             },
                         };
                         logger.error(error);
+                        error.success = false;
                         res.send(error);
                     });
             }
