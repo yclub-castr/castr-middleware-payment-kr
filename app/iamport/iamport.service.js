@@ -391,7 +391,18 @@ class IamportService {
      * @param {*} res 
      */
     deletePaymentMethod(req, res) {
-        const params = { customer_uid: req.body.customer_uid };
+        const business_id = req.params.business_id;
+        const customer_uid = req.body.customer_uid;
+        // Validate business_id & customer_uid consistency
+        const regex = new RegExp(`${business_id}_\\d+$`, 'g');
+        if (!customer_uid.match(regex)) {
+            res.send({
+                success: false,
+                message: `Invalid payment method (#${customer_uid}) for business (#${business_id})`,
+            });
+            return;
+        }
+        const params = { customer_uid: customer_uid };
         this.iamport.subscribe_customer.delete(params)
             .then((iamport_result) => {
                 const msg = `Payment method (${iamport_result.customer_uid}) has been removed.`;
@@ -511,34 +522,44 @@ class IamportService {
             return;
         }
         const business_id = req.params.business_id;
-        const charge_num = req.body.charge_num || 0;
-        const merchant_uid = `${business_id}_ch${charge_num}`;
-        const subscription_params = {
-            business_id: business_id,
-            merchant_uid: merchant_uid,
-            type: payment_type.initial,
-            billing_plan: billing_plan,
-            pay_date: moment().toDate(),
-            amount: req.body.amount,
-            vat: req.body.vat,
-        };
-        // Process initial payment
-        this.pay(subscription_params)
-            .then((result) => {
-                const msg = `Initial payment sccuessful (${merchant_uid})`;
-                logger.debug(`Enabling Castr service for business (${business_id})`);
-                res.send({
-                    success: true,
-                    message: msg,
-                    data: result.data,
-                });
-            })
-            .catch((error) => {
-                error.message = `Initial payment failed (${merchant_uid})`;
-                logger.error(error);
-                error.success = false;
-                res.send(error);
-            });
+        mongoDB.getDB().collection('payment-schedule').find(
+            { business_id: business_id },
+            (db_error, cursor) => {
+                let merchant_uid;
+                cursor.sort({ time_scheduled: -1 }).limit(1).next()
+                    // Fetch latest schedule
+                    .then((last_scheduled) => {
+                        const charge_num = req.body.charge_num || parseInt(last_scheduled.merchant_uid.match(/\d+$/)[0]) + 1 || 0;
+                        merchant_uid = `${business_id}_ch${charge_num}`;
+                        const subscription_params = {
+                            business_id: business_id,
+                            merchant_uid: merchant_uid,
+                            type: payment_type.initial,
+                            billing_plan: billing_plan,
+                            pay_date: moment().toDate(),
+                            amount: req.body.amount,
+                            vat: req.body.vat,
+                        };
+                        // Process initial payment
+                        return this.pay(subscription_params);
+                    })
+                    .then((result) => {
+                        const msg = `Initial payment sccuessful (${merchant_uid})`;
+                        logger.debug(`Enabling Castr service for business (${business_id})`);
+                        res.send({
+                            success: true,
+                            message: msg,
+                            data: result.data,
+                        });
+                    })
+                    .catch((error) => {
+                        error.message = `Initial payment failed (${merchant_uid})`;
+                        logger.error(error);
+                        error.success = false;
+                        res.send(error);
+                    });
+            }
+        );
     }
 
     changeSubscription(req, res) {
@@ -693,10 +714,10 @@ class IamportService {
             { business_id: business_id },
             (db_error, cursor) => {
                 if (db_error) {
-                    logger.error(`${db_error}`);
+                    logger.error(db_error);
                     return;
                 }
-                cursor.sort({ schedule: -1 }).limit(2).next()
+                cursor.sort({ time_scheduled: -1 }).limit(2).next()
                     // Fetch latest schedule
                     .then((last_scheduled) => {
                         // If never subscribed, abort
@@ -896,7 +917,7 @@ class IamportService {
                             .minute(0)
                             .second(0)
                             .millisecond(0);
-                        // Insert to payment-schedule collection
+                        // Insert next schedule to DB
                         const next_charge_num = parseInt(custom_data.merchant_uid.match(/\d+$/)[0]) + 1;
                         const next_merchant_uid = `${custom_data.business_id}_ch${next_charge_num}`;
                         mongoDB.getDB().collection('payment-schedule').insertOne(
