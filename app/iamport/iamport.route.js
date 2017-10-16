@@ -37,14 +37,6 @@ router.route('/:business_id/payment-method')
     });
 
 /**
- * Used for internal testing.
- */
-router.post('/:business_id/payment-method/create', (req, res) => {
-    // Creates a customer (single payment method) using the provided 'customer_uid'
-    iamportService.createPaymentMethod(req, res);
-});
-
-/**
  * Set the payment method as the default for this business.
  */
 router.post('/:business_id/payment-method/:customer_uid', (req, res) => {
@@ -89,6 +81,11 @@ router.post('/:business_id/resume', (req, res) => {
 router.get('/:business_id/history', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
     iamportService.getHistory(req, res);
+});
+
+router.post('/:business_id/menucast', (req, res) => {
+    // Retrieve all transaction hisotry for the provided `merchant_uid`
+    iamportService.mcPay(req, res);
 });
 
 router.route('/payment-hook')

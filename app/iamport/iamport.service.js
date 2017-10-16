@@ -288,9 +288,11 @@ class IamportService {
      * @param {*} req
      * @param {*} res
      */
-    createPaymentMethod(req, res) {
+    savePaymentMethod(req, res) {
         const business_id = req.params.business_id;
-        const last_4_digits = req.body.card_number.split('-')[3];
+        // TODO: decrypt card number
+        const card_number = req.body.card_number;
+        const last_4_digits = card_number.split('-')[3];
         // Check for I'mport vulnerability
         if (last_4_digits.length !== 4) {
             const msg = `The last 4 digits are not 4 digits long (${last_4_digits}).`;
@@ -310,7 +312,7 @@ class IamportService {
         this.iamport.subscribe_customer.create({
             // Required
             customer_uid: customer_uid,
-            card_number: req.body.card_number,
+            card_number: card_number,
             expiry: req.body.expiry,
             birth: req.body.birth,
             pwd_2digit: req.body.pwd_2digit,
@@ -322,73 +324,52 @@ class IamportService {
             customer_postcode: req.body.customer_postcode,
         })
             .then((iamport_result) => {
-                res.send({
-                    success: true,
-                    message: `New payment method (${iamport_result.customer_uid}) has been created.`,
-                    data: iamport_result,
-                });
-            }).catch((iamport_error) => {
-                const error = {
-                    success: false,
-                    message: 'Something went wrong with I\'mport while registering new payment method.',
-                    params: {
+                const is_default = req.body.is_default;
+                // Update this payment method to the business account in castrDB
+                return mongoDB.getDB().collection('payment-methods').updateOne(
+                    {
                         business_id: business_id,
-                        customer_uid: customer_uid,
+                        customer_uid: iamport_result.customer_uid,
                     },
-                    error: {
-                        code: iamport_error.code,
-                        message: iamport_error.message,
+                    {
+                        $setOnInsert: {
+                            business_id: business_id,
+                            customer_uid: iamport_result.customer_uid,
+                            time_created: new Date(),
+                        },
+                        $set: {
+                            default_method: is_default,
+                            time_updated: new Date(),
+                        },
                     },
-                };
-                res.send(error);
-            });
-    }
-
-    savePaymentMethod(req, res) {
-        const business_id = req.params.business_id;
-        const customer_uid = req.body.customer_uid;
-        const is_default = req.body.is_default;
-        // Update this payment method to the business account in castrDB
-        mongoDB.getDB().collection('payment-methods').updateOne(
-            {
-                business_id: business_id,
-                customer_uid: customer_uid,
-            },
-            {
-                $setOnInsert: {
-                    business_id: business_id,
-                    created_time: new Date(),
-                },
-                $set: {
-                    customer_uid: customer_uid,
-                    default_method: is_default,
-                    updated_time: new Date(),
-                },
-            },
-            { upsert: true }
-        )
+                    { upsert: true }
+                );
+            })
             .then((write_result) => {
                 res.send({
                     success: true,
                     message: `Payment method (${customer_uid}) has been saved to DB.`,
-                    data: write_result,
+                    data: {
+                        inserted: write_result.upsertedCount,
+                        updated: write_result.modifiedCount,
+                    },
                 });
             })
             .catch((err) => {
                 const error = {
-                    message: 'Encountered error while upserting to payment-method',
+                    success: false,
+                    message: 'Something went wrong while registering payment method.',
                     params: {
                         business_id: business_id,
                         customer_uid: customer_uid,
-                        is_default: is_default,
+                        is_default: req.body.is_default,
                     },
                     error: {
-                        code: err.code || 'castr_payment_error',
+                        code: err.code,
                         message: err.message,
                     },
                 };
                 logger.error(error);
-                error.success = false;
                 res.send(error);
             });
     }
@@ -592,7 +573,7 @@ class IamportService {
                             error: {
                                 code: error.code || 'castr_payment_error',
                                 message: error.message,
-                            }
+                            },
                         });
                     });
             }
@@ -1014,7 +995,7 @@ class IamportService {
                                     $set: {
                                         status: status,
                                         time_processed: new Date(),
-                                    }
+                                    },
                                 }
                             );
                         }
