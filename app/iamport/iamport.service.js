@@ -774,7 +774,7 @@ class IamportService {
                         const params = {
                             merchant_uid: refund.merchant_uid,
                             amount: refund.amount,
-                            reason: 'Castr user refund request',
+                            reason: req.body.reason || 'Castr user refund request',
                         };
                         return this.iamport.payment.cancel(params);
                     })
