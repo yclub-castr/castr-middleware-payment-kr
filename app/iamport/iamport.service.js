@@ -291,39 +291,29 @@ class IamportService {
      */
     savePaymentMethod(req, res) {
         const business_id = req.params.business_id;
-        // TODO: decrypt card number
-        const card_number = req.body.card_number;
-        const last_4_digits = card_number.split('-')[3];
-        // Check for I'mport vulnerability
-        if (last_4_digits.length !== 4) {
-            const msg = `The last 4 digits are not 4 digits long (${last_4_digits}).`;
-            logger.error(msg);
-            res.send({
-                success: false,
-                message: msg,
-                error: {
-                    code: 'castr_payment_error',
-                    message: msg,
-                },
-            });
-            return;
-        }
-        // Request I'mport service
-        const customer_uid = `${business_id}_${last_4_digits}`;
-        this.iamport.subscribe_customer.create({
-            // Required
-            customer_uid: customer_uid,
-            card_number: card_number,
-            expiry: req.body.expiry,
-            birth: req.body.birth,
-            pwd_2digit: req.body.pwd_2digit,
-            // Optional
-            customer_name: req.body.customer_name,
-            customer_tel: req.body.customer_tel,
-            customer_email: req.body.customer_email,
-            customer_addr: req.body.customer_addr,
-            customer_postcode: req.body.customer_postcode,
-        })
+        let customer_uid;
+        this._rsaDecrypt(req.body.card_encrypted)
+            .then((card_number) => {
+                const last_4_digits = card_number.split('-')[3];
+                customer_uid = `${business_id}_${last_4_digits}`;
+                // Check for I'mport vulnerability
+                if (last_4_digits.length !== 4) { throw new Error(`The last 4 digits are not 4 digits long (${last_4_digits}).`); }
+                // Request I'mport service
+                return this.iamport.subscribe_customer.create({
+                    // Required
+                    customer_uid: customer_uid,
+                    card_number: card_number,
+                    expiry: req.body.exp,
+                    birth: req.body.dob,
+                    pwd_2digit: req.body.pwd_2digit,
+                    // Optional
+                    customer_name: req.body.customer_name,
+                    customer_tel: req.body.customer_tel,
+                    customer_email: req.body.customer_email,
+                    customer_addr: req.body.customer_addr,
+                    customer_postcode: req.body.customer_postcode,
+                });
+            })
             .then((iamport_result) => {
                 const is_default = req.body.is_default;
                 // Update this payment method to the business account in castrDB
@@ -347,9 +337,11 @@ class IamportService {
                 );
             })
             .then((write_result) => {
+                const msg = `Payment method (${customer_uid}) has been saved to DB.`;
+                logger.debug(msg);
                 res.send({
                     success: true,
-                    message: `Payment method (${customer_uid}) has been saved to DB.`,
+                    message: msg,
                     data: {
                         inserted: write_result.upsertedCount,
                         updated: write_result.modifiedCount,
