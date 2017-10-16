@@ -70,7 +70,10 @@
                     "refund",
                     "pause",
                     "resume",
-                    "mcPaymentHook"
+                    "mcPaymentHook",
+                    "savePaymentMethod",
+                    "getPlan",
+                    "_rsaDecrypt"
                 ]
             }
         ],

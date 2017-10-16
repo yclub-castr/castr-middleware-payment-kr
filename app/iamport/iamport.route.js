@@ -12,7 +12,7 @@ const router = express.Router();
  */
 router.get('/:business_id', (req, res) => {
     // Uses 'customer_uid' to retrieve the payment method
-    iamportService.getPaymentMethods(req, res);
+    iamportService.getPlan(req, res);
 });
 
 /**
@@ -23,15 +23,18 @@ router.get('/:business_id', (req, res) => {
  * - Once we call POST /customer/:customer_uid, we can use the `customer_uid` to request payment using the corresponding payment method.
  */
 router.route('/:business_id/payment-method')
+    .get((req, res) => {
+        // Creates a customer (single payment method) using the provided 'customer_uid'
+        iamportService.getPaymentMethods(req, res);
+    })
     .post((req, res) => {
         // Creates a customer (single payment method) using the provided 'customer_uid'
-        iamportService.createPaymentMethod(req, res);
+        iamportService.savePaymentMethod(req, res);
     })
     .delete((req, res) => {
         // Uses 'customer_uid' to delete the payment method
         iamportService.deletePaymentMethod(req, res);
     });
-
 
 /**
  * Set the payment method as the default for this business.
@@ -78,6 +81,11 @@ router.post('/:business_id/resume', (req, res) => {
 router.get('/:business_id/history', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
     iamportService.getHistory(req, res);
+});
+
+router.post('/:business_id/menucast/:promotable_id', (req, res) => {
+    // Retrieve all transaction hisotry for the provided `merchant_uid`
+    iamportService.mcPay(req, res);
 });
 
 router.route('/payment-hook')
