@@ -5,7 +5,8 @@
 const mongoDB = require('../db');
 const logger = require('../utils').logger();
 const moment = require('../utils').moment();
-const nodemailer = require('../utils').nodemailer();
+const crypto2 = require('crypto2');
+const shortid = require('shortid');
 const Iamport = require('iamport');
 
 const timezone = {
@@ -1137,6 +1138,71 @@ class IamportService {
         }
     }
 
+    mcPay(req, res) {
+        const business_id = req.params.business_id;
+        const promotable_id = req.params.promotable_id;
+        const custom_data = {
+            business_id: business_id,
+            name: this._generateName({
+                business_id: business_id,
+                promotable_id: promotable_id,
+                type: payment_type.menucast,
+            }),
+            type: 'menucast',
+        };
+        this._rsaDecrypt(req.body.card_encrypted)
+            // Send payment request
+            .then((card_number) => {
+                const params = {
+                    name: custom_data.name.short,
+                    merchant_uid: `mc_${shortid.generate()}`,
+                    amount: req.body.amount,
+                    card_number: card_number,
+                    expiry: req.body.exp,
+                    birth: req.body.dob,
+                    pwd_2digit: req.body.pwd_2digit,
+                    custom_data: JSON.stringify(custom_data),
+                    buyer_name: req.body.name,
+                    buyer_tel: req.body.phone,
+                    buyer_email: req.body.email,
+                    buyer_addr: req.body.address,
+                    buyer_postcode: req.body.zip,
+                };
+                return this.iamport.subscribe.onetime(params);
+            })
+            // Process response
+            .then((iamport_result) => {
+                if (status_type[iamport_result.status] === status_type.failed) {
+                    res.send({
+                        success: false,
+                        message: iamport_result.fail_reason,
+                        params: JSON.parse(iamport_result.custom_data),
+                        error: {
+                            code: null,
+                            message: iamport_result.fail_reason,
+                        },
+                    });
+                    return;
+                }
+                res.send({
+                    success: true,
+                    message: 'Payment successful',
+                });
+            })
+            .catch((err) => {
+                const error = {
+                    params: custom_data,
+                    error: {
+                        code: err.code || 'mc_pay_error',
+                        message: err.message,
+                    },
+                };
+                logger.error(error);
+                error.success = false;
+                res.send(error);
+            });
+    }
+
     mcPaymentHook(req) {
         // Ditch non-MC notifications
         if (req.body.merchant_uid.substring(0, 3) !== 'mc_') { return; }
@@ -1209,6 +1275,15 @@ class IamportService {
             long: `Castr subscription #${business_id} ${start.format('M/D')}-${end.format('M/D')} (${billing_plan})`,
             long_kr: `캐스터 정기구독 #${business_id} ${start.format('M/D')}-${end.format('M/D')} (${billing_plan_type[billing_plan]}주)`,
         };
+    }
+
+    _rsaDecrypt(encrypted) {
+        return new Promise((resolve, reject) => {
+            crypto2.decrypt.rsa(encrypted, process.env.RSA_PRIV_KEY, (err, decrypted) => {
+                if (err) { return reject(err); }
+                return resolve(decrypted);
+            });
+        });
     }
 }
 

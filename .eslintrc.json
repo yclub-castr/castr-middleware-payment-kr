@@ -72,7 +72,8 @@
                     "resume",
                     "mcPaymentHook",
                     "savePaymentMethod",
-                    "getPlan"
+                    "getPlan",
+                    "_rsaDecrypt"
                 ]
             }
         ],

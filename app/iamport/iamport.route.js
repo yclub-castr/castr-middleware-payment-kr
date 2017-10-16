@@ -83,7 +83,7 @@ router.get('/:business_id/history', (req, res) => {
     iamportService.getHistory(req, res);
 });
 
-router.post('/:business_id/menucast', (req, res) => {
+router.post('/:business_id/menucast/:promotable_id', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
     iamportService.mcPay(req, res);
 });
