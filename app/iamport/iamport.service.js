@@ -1130,6 +1130,7 @@ class IamportService {
             }),
             type: 'mc_purchase',
             promotable_name: promotable_name,
+            perc_disc_applied: req.body.discount,
         };
         let card_number;
         this._rsaDecrypt(req.body.card_encrypted)
@@ -1209,6 +1210,7 @@ class IamportService {
                         promotable_name: custom_data.promotable_name,
                         currency: mc_iamport_result.currency,
                         amount: mc_iamport_result.amount,
+                        perc_disc_applied: custom_data.perc_disc_applied,
                         pay_method: mc_iamport_result.pay_method,
                         card_name: mc_iamport_result.card_name,
                         status: status,
