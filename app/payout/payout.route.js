@@ -9,10 +9,17 @@ const opService = require('./op.service');
 const router = express.Router();
 
 /**
- * Get all payout transactions for ':business_id'
+ * Get statements for ':business_id'
  */
 router.get('/:business_id', (req, res) => {
-    payoutService.getHistory(req, res);
+    payoutService.getStatements(req, res);
+});
+
+/**
+ * Get statement details for ':business_id'
+ */
+router.get('/:business_id/details/:statement_id', (req, res) => {
+    payoutService.getStatementDetails(req, res);
 });
 
 module.exports = router;

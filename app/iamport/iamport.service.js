@@ -3,42 +3,19 @@
 'use strict';
 
 const mongoDB = require('../db');
+const constants = require('../constants');
 const logger = require('../utils').logger();
 const moment = require('../utils').moment();
 const crypto2 = require('crypto2');
 const shortid = require('shortid');
 const Iamport = require('iamport');
 
-const timezone = {
-    kr: 'ASIA/SEOUL',
-    utc: 'UTC',
-};
-
-const billing_plan_type = {
-    '4_WEEK': 4,
-    '26_WEEK': 26,
-    '52_WEEK': 52,
-};
-
-const payment_type = {
-    initial: 'INITIAL',
-    scheduled: 'SCHEDULED',
-    refund: 'REFUND',
-    menucast: 'MC',
-};
-
-const status_type = {
-    paid: 'PAID',
-    cancelled: 'REFUNDED',
-    failed: 'FAILED',
-    scheduled: 'SCHEDULED',
-    unscheduled: 'CANCELLED',
-    paused: 'PAUSED',
-};
-
-const full_day = 24 * 60 * 60 * 1000;
-
-const refund_fee_perc = 0.2;
+const timezone = constants.timezone;
+const billing_plan_type = constants.billing_plan_type;
+const payment_type = constants.payment_type;
+const status_type = constants.status_type;
+const full_day = constants.full_day;
+const refund_fee_perc = constants.refund_fee_perc;
 
 class IamportService {
     /**
@@ -69,7 +46,7 @@ class IamportService {
             this._checkScheduledPayments();
         };
         setTimeout(callback.bind(this), time_until);
-        logger.debug(`Next schedule check scheduled at ${(time_until / 3600000).toFixed(2)} hours later.`);
+        logger.debug(`Next pay-schedule checking scheduled at ${(time_until / 3600000).toFixed(2)} hours later.`);
     }
 
     /**
@@ -1143,14 +1120,17 @@ class IamportService {
     mcPay(req, res) {
         const business_id = req.params.business_id;
         const promotable_id = req.params.promotable_id;
+        const promotable_name = req.body.promotable_name;
         const custom_data = {
             business_id: business_id,
             name: this._generateName({
                 business_id: business_id,
                 promotable_id: promotable_id,
-                type: payment_type.menucast,
+                type: payment_type.mc_purchase,
             }),
-            type: 'menucast',
+            type: 'mc_purchase',
+            promotable_name: promotable_name,
+            perc_disc_applied: req.body.discount,
         };
         let card_number;
         this._rsaDecrypt(req.body.card_encrypted)
@@ -1220,15 +1200,17 @@ class IamportService {
                 const custom_data = JSON.parse(mc_iamport_result.custom_data);
                 const type = payment_type[custom_data.type];
                 const status = status_type[mc_iamport_result.status];
-                if (type === payment_type.menucast && status === status_type.paid) {
+                if (type === payment_type.mc_purchase && status === status_type.paid) {
                     // Insert payment result to db
-                    mongoDB.getDB().collection('mc-payment-transactions').insertOne({
+                    mongoDB.getDB().collection('mc-transactions').insertOne({
                         business_id: custom_data.business_id,
                         merchant_uid: mc_iamport_result.merchant_uid,
                         type: type,
                         name: custom_data.name,
+                        promotable_name: custom_data.promotable_name,
                         currency: mc_iamport_result.currency,
                         amount: mc_iamport_result.amount,
+                        perc_disc_applied: custom_data.perc_disc_applied,
                         pay_method: mc_iamport_result.pay_method,
                         card_name: mc_iamport_result.card_name,
                         status: status,
@@ -1265,7 +1247,7 @@ class IamportService {
             };
         }
         const business_id = params.business_id;
-        if (params.type === payment_type.menucast) {
+        if (params.type === payment_type.mc_purchase) {
             const promotable_id = params.promotable_id;
             return {
                 short: `MC#${business_id}=${promotable_id}`,
