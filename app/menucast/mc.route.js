@@ -11,7 +11,7 @@ const router = express.Router();
 /**
  * Get all payout transactions for ':business_id'
  */
-router.get('/:business_id/coupon-redeem/:promotable_id', (req, res) => {
+router.post('/:business_id/coupon-redeem/:promotable_id', (req, res) => {
     mcService.couponRedeemHook(req, res);
 });
 
