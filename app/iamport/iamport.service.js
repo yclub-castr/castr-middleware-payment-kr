@@ -1120,6 +1120,7 @@ class IamportService {
     mcPay(req, res) {
         const business_id = req.params.business_id;
         const promotable_id = req.params.promotable_id;
+        const promotable_name = req.body.promotable_name;
         const custom_data = {
             business_id: business_id,
             name: this._generateName({
@@ -1128,6 +1129,7 @@ class IamportService {
                 type: payment_type.mc_purchase,
             }),
             type: 'mc_purchase',
+            promotable_name: promotable_name,
         };
         let card_number;
         this._rsaDecrypt(req.body.card_encrypted)
@@ -1204,6 +1206,7 @@ class IamportService {
                         merchant_uid: mc_iamport_result.merchant_uid,
                         type: type,
                         name: custom_data.name,
+                        promotable_name: custom_data.promotable_name,
                         currency: mc_iamport_result.currency,
                         amount: mc_iamport_result.amount,
                         pay_method: mc_iamport_result.pay_method,
