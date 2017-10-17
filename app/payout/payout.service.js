@@ -91,6 +91,7 @@ class PayoutService {
                     });
             }
         );
+        // TODO: Integrate with Open-Platform for actual payout.
         this._checkEverySecondFriday();
     }
 
