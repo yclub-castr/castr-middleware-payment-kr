@@ -11,6 +11,7 @@ const moment = require('../utils').moment();
 
 const timezone = constants.timezone;
 const payment_type = constants.payment_type;
+const status_type = constants.status_type;
 const week = constants.week;
 
 class PayoutService {
@@ -136,6 +137,7 @@ class PayoutService {
                     {
                         business_id: business_id,
                         type: payment_type.mc_purchase,
+                        status: status_type.paid,
                         $and: [
                             { time_created: { $gte: start_date } },
                             { time_created: { $lt: end_date } }
@@ -145,7 +147,16 @@ class PayoutService {
                         const purchases = [];
                         cursor.sort({ time_created: -1 }).forEach(
                             // Iteration callback
-                            (transaction) => { purchases.push(transaction); },
+                            (document) => { 
+                                const transaction = {
+                                    date: document.time_created,
+                                    description: document.promotable_name,
+                                    amount: document.amount,
+                                    type: document.type,
+                                    status: document.status,
+                                };
+                                purchases.push(transaction); 
+                            },
                             // End callback
                             (end) => {
                                 const msg = `[#${business_id}] Menucast purchases for date_range ${moment(start_date).tz(timezone.kr).format('L')} - ${moment(end_date).tz(timezone.kr).format('L')}`;
