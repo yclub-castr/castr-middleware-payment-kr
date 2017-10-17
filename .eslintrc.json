@@ -58,25 +58,7 @@
                 "functions": "never"
             }
         ],
-        "class-methods-use-this": [
-            "warn",
-            {
-                "exceptMethods": [
-                    "setAsDefault",
-                    "getHistory",
-                    "paymentHook",
-                    "_generateName",
-                    "changeSubscription",
-                    "refund",
-                    "pause",
-                    "resume",
-                    "mcPaymentHook",
-                    "savePaymentMethod",
-                    "getPlan",
-                    "_rsaDecrypt"
-                ]
-            }
-        ],
+        "class-methods-use-this": "off",
         "no-useless-return": "warn",
         "no-param-reassign": [
             "warn",
