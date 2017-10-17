@@ -21,6 +21,7 @@ const status_type = {
     scheduled: 'SCHEDULED',
     unscheduled: 'CANCELLED',
     paused: 'PAUSED',
+    redeemed: 'REDEEMED',
 };
 const full_day = 24 * 60 * 60 * 1000;
 const week = full_day * 7;
