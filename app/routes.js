@@ -4,7 +4,7 @@
 
 const express = require('express');
 const iamport_router = require('./iamport/iamport.route');
-const op_router = require('./open-platform/op.route');
+const payout_router = require('./payout/payout.route');
 
 const router = express.Router();
 
@@ -13,6 +13,6 @@ router.get('/', (req, res) => {
 });
 
 router.use('/payment', iamport_router);
-router.use('/open-platform', op_router);
+router.use('/payout', payout_router);
 
 module.exports = router;

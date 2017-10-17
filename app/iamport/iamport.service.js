@@ -51,10 +51,15 @@ class IamportService {
         });
     }
 
+    initialize() {
+        this._checkScheduleAt6AM();
+        logger.debug('Payment schedule checking initialized.');
+    }
+
     /**
      * Triggers checking payment schedules at 6 am everyday (local time).
      */
-    checkScheduleAt6AM() {
+    _checkScheduleAt6AM() {
         const utc_now = moment.tz(timezone.utc);
         const local_next_morning = moment(utc_now).tz(timezone.kr).add(1, 'day').hour(6).minute(0).second(0).millisecond(0);
         // Calculate time until next 6 am
@@ -292,8 +297,13 @@ class IamportService {
     savePaymentMethod(req, res) {
         const business_id = req.params.business_id;
         let customer_uid;
+        let card_number;
         this._rsaDecrypt(req.body.card_encrypted)
-            .then((card_number) => {
+            .then((card_decrypted) => {
+                card_number = card_decrypted;
+                return this._rsaDecrypt(req.body.pwd_encrypted);
+            })
+            .then((pwd_decrypted) => {
                 const last_4_digits = card_number.split('-')[3];
                 customer_uid = `${business_id}_${last_4_digits}`;
                 // Check for I'mport vulnerability
@@ -305,7 +315,7 @@ class IamportService {
                     card_number: card_number,
                     expiry: req.body.exp,
                     birth: req.body.dob,
-                    pwd_2digit: req.body.pwd_2digit,
+                    pwd_2digit: pwd_decrypted,
                     // Optional
                     customer_name: req.body.customer_name,
                     customer_tel: req.body.customer_tel,
@@ -1142,9 +1152,14 @@ class IamportService {
             }),
             type: 'menucast',
         };
+        let card_number;
         this._rsaDecrypt(req.body.card_encrypted)
             // Send payment request
-            .then((card_number) => {
+            .then((card_decrypted) => {
+                card_number = card_decrypted;
+                return this._rsaDecrypt(req.body.pwd_encrypted);
+            })
+            .then((pwd_decrypted) => {
                 const params = {
                     name: custom_data.name.short,
                     merchant_uid: `mc_${shortid.generate()}`,
@@ -1152,7 +1167,7 @@ class IamportService {
                     card_number: card_number,
                     expiry: req.body.exp,
                     birth: req.body.dob,
-                    pwd_2digit: req.body.pwd_2digit,
+                    pwd_2digit: pwd_decrypted,
                     custom_data: JSON.stringify(custom_data),
                     buyer_name: req.body.name,
                     buyer_tel: req.body.phone,
