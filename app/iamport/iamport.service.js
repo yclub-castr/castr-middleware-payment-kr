@@ -69,7 +69,7 @@ class IamportService {
             this._checkScheduledPayments();
         };
         setTimeout(callback.bind(this), time_until);
-        logger.debug(`Next schedule check scheduled at ${(time_until / 3600000).toFixed(2)} hours later.`);
+        logger.debug(`Next pay-schedule checking scheduled at ${(time_until / 3600000).toFixed(2)} hours later.`);
     }
 
     /**
