@@ -15,7 +15,9 @@ router.get('/:business_id/coupon-redeem/:promotable_id', (req, res) => {
     mcService.couponRedeemHook(req, res);
 });
 
-
+/**
+ * Process one-time Menucast purchases
+ */
 router.post('/:business_id/purchase/:promotable_id', (req, res) => {
     // Retrieve all transaction hisotry for the provided `merchant_uid`
     iamportService.mcPay(req, res);
