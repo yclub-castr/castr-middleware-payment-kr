@@ -1123,6 +1123,7 @@ class IamportService {
         const promotable_name = req.body.promotable_name;
         const custom_data = {
             business_id: business_id,
+            mc_customer_id: req.body.mc_customer_id,
             name: this._generateName({
                 business_id: business_id,
                 promotable_id: promotable_id,
@@ -1205,6 +1206,7 @@ class IamportService {
                     mongoDB.getDB().collection('mc-transactions').insertOne({
                         business_id: custom_data.business_id,
                         merchant_uid: mc_iamport_result.merchant_uid,
+                        mc_customer_id: custom_data.mc_customer_id,
                         type: type,
                         name: custom_data.name,
                         promotable_name: custom_data.promotable_name,
