@@ -30,6 +30,7 @@ class MenucastService {
 
         mongoDB.getDB().collection('mc-transactions').insertOne({
             business_id: business_id,
+            mc_customer_id: req.body.mc_customer_id,
             type: payment_type.mc_redeem,
             name: name,
             promotable_name: req.body.promotable_name,
