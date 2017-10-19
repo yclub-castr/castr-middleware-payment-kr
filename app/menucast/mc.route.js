@@ -23,12 +23,4 @@ router.post('/:business_id/purchase/:promotable_id', (req, res) => {
     iamportService.mcPay(req, res);
 });
 
-/**
- * This endpoint will be reserved for Iamport to send success/failure result on payment transactions.
- */
-router.route('/payment-hook')
-    .post((req) => {
-        iamportService.mcPaymentHook(req);
-    });
-
 module.exports = router;
