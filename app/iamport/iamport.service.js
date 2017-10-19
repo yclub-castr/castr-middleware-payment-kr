@@ -274,15 +274,14 @@ class IamportService {
     savePaymentMethod(req, res) {
         const business_id = req.params.business_id;
         let customer_uid;
-        let card_number;
-        this._rsaDecrypt(req.body.card_encrypted)
-            .then((card_decrypted) => {
-                card_number = card_decrypted;
-                return this._rsaDecrypt(req.body.pwd_encrypted);
-            })
-            .then((pwd_decrypted) => {
+        let is_default;
+        this._rsaDecrypt(req.body.payload)
+            .then((payload) => {
+                const body = JSON.parse(payload);
+                const card_number = body.card_number;
                 const last_4_digits = card_number.split('-')[3];
                 customer_uid = `${business_id}_${last_4_digits}`;
+                is_default = body.is_default;
                 // Check for I'mport vulnerability
                 if (last_4_digits.length !== 4) { throw new Error(`The last 4 digits are not 4 digits long (${last_4_digits}).`); }
                 // Request I'mport service
@@ -290,39 +289,33 @@ class IamportService {
                     // Required
                     customer_uid: customer_uid,
                     card_number: card_number,
-                    expiry: req.body.exp,
-                    birth: req.body.dob,
-                    pwd_2digit: pwd_decrypted,
+                    pwd_2digit: body.pwd_2digit,
+                    expiry: body.exp,
+                    birth: body.dob,
                     // Optional
-                    customer_name: req.body.customer_name,
-                    customer_tel: req.body.customer_tel,
-                    customer_email: req.body.customer_email,
-                    customer_addr: req.body.customer_addr,
-                    customer_postcode: req.body.customer_postcode,
+                    customer_name: body.name,
+                    customer_tel: body.phone,
+                    customer_email: body.email,
+                    customer_addr: body.address,
+                    customer_postcode: body.zip,
                 });
             })
-            .then((iamport_result) => {
-                const is_default = req.body.is_default;
-                // Update this payment method to the business account in castrDB
-                return mongoDB.getDB().collection('payment-methods').updateOne(
-                    {
+            // Update this payment method to the business account in castrDB
+            .then(iamport_result => mongoDB.getDB().collection('payment-methods').updateOne(
+                { customer_uid: iamport_result.customer_uid },
+                {
+                    $setOnInsert: {
                         business_id: business_id,
                         customer_uid: iamport_result.customer_uid,
+                        time_created: new Date(),
                     },
-                    {
-                        $setOnInsert: {
-                            business_id: business_id,
-                            customer_uid: iamport_result.customer_uid,
-                            time_created: new Date(),
-                        },
-                        $set: {
-                            default_method: is_default,
-                            time_updated: new Date(),
-                        },
+                    $set: {
+                        default_method: is_default,
+                        time_updated: new Date(),
                     },
-                    { upsert: true }
-                );
-            })
+                },
+                { upsert: true }
+            ))
             .then((write_result) => {
                 const msg = `Payment method (${customer_uid}) has been saved to DB.`;
                 logger.debug(msg);
