@@ -1119,6 +1119,7 @@ class IamportService {
         this._rsaDecrypt(req.body.payload)
             .then((payload) => {
                 const body = JSON.parse(payload);
+                custom_data.quantity = body.qty;
                 // User payment method
                 user_data.card_number = body.card_number;
                 user_data.pwd_2digit = body.pwd_2digit;
@@ -1133,13 +1134,12 @@ class IamportService {
                 return mongoDB.getDB().collection('promotions').findOne({ promoTable: { $elemMatch: { _id: mongoDB.ObjectId(promotable_id) } } });
             })
             .then((promotion) => {
-                let amount;
                 promotion.promoTable.forEach((promotable) => {
                     if (promotable._id.toString() === promotable_id) {
                         custom_data.promotable_id = promotable_id;
                         custom_data.promotable_name = promotable.nameOne;
                         custom_data.perc_disc_applied = promotable.discount;
-                        amount = (promotable.price * (1 - (promotable.discount / 100))).toFixed(0);
+                        custom_data.amount = (promotable.price * (1 - (promotable.discount / 100))).toFixed(0);
                     }
                 });
                 // Custom data for I'mport
@@ -1154,7 +1154,7 @@ class IamportService {
                 return this.iamport.subscribe.onetime({
                     name: custom_data.name.short,
                     merchant_uid: `mc_${shortid.generate()}`,
-                    amount: amount,
+                    amount: custom_data.amount * custom_data.quantity,
                     card_number: user_data.card_number,
                     pwd_2digit: user_data.pwd_2digit,
                     expiry: user_data.expiry,
@@ -1210,14 +1210,15 @@ class IamportService {
             // Insert payment result to db
             mongoDB.getDB().collection('mc-transactions').insertOne({
                 business_id: custom_data.business_id,
+                mc_customer_id: custom_data.mc_customer_id,
                 promotable_id: custom_data.promotable_id,
                 promotable_name: custom_data.promotable_name,
+                quantity: custom_data.quantity,
                 merchant_uid: mc_iamport_result.merchant_uid,
-                mc_customer_id: custom_data.mc_customer_id,
                 type: custom_data.type,
                 name: custom_data.name,
                 currency: mc_iamport_result.currency,
-                amount: mc_iamport_result.amount,
+                amount: custom_data.amount,
                 perc_disc_applied: custom_data.perc_disc_applied,
                 pay_method: mc_iamport_result.pay_method,
                 card_name: mc_iamport_result.card_name,
