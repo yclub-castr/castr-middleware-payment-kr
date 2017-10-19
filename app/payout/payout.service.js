@@ -110,7 +110,11 @@ class PayoutService {
                 const statements = [];
                 cursor.sort({ time_created: -1 }).forEach(
                     // Iteration callback
-                    (statement) => { statements.push(statement); },
+                    (statement) => { 
+                        statement.date_range.start = moment(statement.date_range.start).tz(timezone.kr).locale('kr').format('LL');
+                        statement.date_range.end = moment(statement.date_range.end).tz(timezone.kr).locale('kr').format('LL');
+                        statements.push(statement); 
+                    },
                     // End callback
                     (end) => {
                         const msg = `Payout statements fetched for business (${business_id})`;
@@ -128,10 +132,10 @@ class PayoutService {
     }
 
     getStatementDetails(req, res) {
-        const business_id = req.params.business_id;
         const statement_id = req.params.statement_id;
         mongoDB.getDB().collection('mc-statements').findOne({ _id: mongoDB.ObjectId(statement_id) })
             .then((statement) => {
+                const business_id = statement.business_id;
                 const start_date = statement.date_range.start;
                 const end_date = statement.date_range.end;
                 mongoDB.getDB().collection('mc-transactions').find(
@@ -150,7 +154,7 @@ class PayoutService {
                             // Iteration callback
                             (document) => { 
                                 const transaction = {
-                                    date: document.time_created,
+                                    date: moment(document.time_created).tz(timezone.kr).locale('kr').format('LL'),
                                     description: document.promotable_name,
                                     amount: document.amount,
                                     type: document.type,
