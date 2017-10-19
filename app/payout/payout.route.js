@@ -18,7 +18,7 @@ router.get('/:business_id', (req, res) => {
 /**
  * Get statement details for ':business_id'
  */
-router.get('/:business_id/details/:statement_id', (req, res) => {
+router.get('/statement/:statement_id', (req, res) => {
     payoutService.getStatementDetails(req, res);
 });
 
