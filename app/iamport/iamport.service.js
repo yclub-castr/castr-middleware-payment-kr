@@ -274,15 +274,14 @@ class IamportService {
     savePaymentMethod(req, res) {
         const business_id = req.params.business_id;
         let customer_uid;
-        let card_number;
-        this._rsaDecrypt(req.body.card_encrypted)
-            .then((card_decrypted) => {
-                card_number = card_decrypted;
-                return this._rsaDecrypt(req.body.pwd_encrypted);
-            })
-            .then((pwd_decrypted) => {
+        let is_default;
+        this._rsaDecrypt(req.body.payload)
+            .then((payload) => {
+                const body = JSON.parse(payload);
+                const card_number = body.card_number;
                 const last_4_digits = card_number.split('-')[3];
                 customer_uid = `${business_id}_${last_4_digits}`;
+                is_default = body.is_default;
                 // Check for I'mport vulnerability
                 if (last_4_digits.length !== 4) { throw new Error(`The last 4 digits are not 4 digits long (${last_4_digits}).`); }
                 // Request I'mport service
@@ -290,39 +289,33 @@ class IamportService {
                     // Required
                     customer_uid: customer_uid,
                     card_number: card_number,
-                    expiry: req.body.exp,
-                    birth: req.body.dob,
-                    pwd_2digit: pwd_decrypted,
+                    pwd_2digit: body.pwd_2digit,
+                    expiry: body.exp,
+                    birth: body.dob,
                     // Optional
-                    customer_name: req.body.customer_name,
-                    customer_tel: req.body.customer_tel,
-                    customer_email: req.body.customer_email,
-                    customer_addr: req.body.customer_addr,
-                    customer_postcode: req.body.customer_postcode,
+                    customer_name: body.name,
+                    customer_tel: body.phone,
+                    customer_email: body.email,
+                    customer_addr: body.address,
+                    customer_postcode: body.zip,
                 });
             })
-            .then((iamport_result) => {
-                const is_default = req.body.is_default;
-                // Update this payment method to the business account in castrDB
-                return mongoDB.getDB().collection('payment-methods').updateOne(
-                    {
+            // Update this payment method to the business account in castrDB
+            .then(iamport_result => mongoDB.getDB().collection('payment-methods').updateOne(
+                { customer_uid: iamport_result.customer_uid },
+                {
+                    $setOnInsert: {
                         business_id: business_id,
                         customer_uid: iamport_result.customer_uid,
+                        time_created: new Date(),
                     },
-                    {
-                        $setOnInsert: {
-                            business_id: business_id,
-                            customer_uid: iamport_result.customer_uid,
-                            time_created: new Date(),
-                        },
-                        $set: {
-                            default_method: is_default,
-                            time_updated: new Date(),
-                        },
+                    $set: {
+                        default_method: is_default,
+                        time_updated: new Date(),
                     },
-                    { upsert: true }
-                );
-            })
+                },
+                { upsert: true }
+            ))
             .then((write_result) => {
                 const msg = `Payment method (${customer_uid}) has been saved to DB.`;
                 logger.debug(msg);
@@ -1120,43 +1113,59 @@ class IamportService {
     mcPay(req, res) {
         const business_id = req.params.business_id;
         const promotable_id = req.params.promotable_id;
-        const promotable_name = req.body.promotable_name;
-        const custom_data = {
-            business_id: business_id,
-            mc_customer_id: req.body.mc_customer_id,
-            name: this._generateName({
-                business_id: business_id,
-                promotable_id: promotable_id,
-                type: payment_type.mc_purchase,
-            }),
-            type: 'mc_purchase',
-            promotable_name: promotable_name,
-            perc_disc_applied: req.body.discount,
-        };
-        let card_number;
-        this._rsaDecrypt(req.body.card_encrypted)
-            // Send payment request
-            .then((card_decrypted) => {
-                card_number = card_decrypted;
-                return this._rsaDecrypt(req.body.pwd_encrypted);
+        const mc_customer_id = req.body.mc_customer_id;
+        const custom_data = {};
+        const user_data = {};
+        this._rsaDecrypt(req.body.payload)
+            .then((payload) => {
+                const body = JSON.parse(payload);
+                custom_data.quantity = body.qty;
+                // User payment method
+                user_data.card_number = body.card_number;
+                user_data.pwd_2digit = body.pwd_2digit;
+                user_data.expiry = body.exp;
+                user_data.birth = body.dob;
+                // User data
+                user_data.buyer_name = body.name;
+                user_data.buyer_tel = body.phone;
+                user_data.buyer_email = body.email;
+                user_data.buyer_addr = body.address;
+                user_data.buyer_postcode = body.zip;
+                return mongoDB.getDB().collection('promotions').findOne({ promoTable: { $elemMatch: { _id: mongoDB.ObjectId(promotable_id) } } });
             })
-            .then((pwd_decrypted) => {
-                const params = {
+            .then((promotion) => {
+                promotion.promoTable.forEach((promotable) => {
+                    if (promotable._id.toString() === promotable_id) {
+                        custom_data.promotable_id = promotable_id;
+                        custom_data.promotable_name = promotable.nameOne;
+                        custom_data.perc_disc_applied = promotable.discount;
+                        custom_data.amount = parseInt(promotable.price * (1 - (promotable.discount / 100)));
+                    }
+                });
+                // Custom data for I'mport
+                custom_data.business_id = business_id;
+                custom_data.mc_customer_id = mc_customer_id;
+                custom_data.name = this._generateName({
+                    business_id: business_id,
+                    promotable_name: custom_data.promotable_name,
+                    type: payment_type.mc_purchase,
+                });
+                custom_data.type = payment_type.mc_purchase;
+                return this.iamport.subscribe.onetime({
                     name: custom_data.name.short,
                     merchant_uid: `mc_${shortid.generate()}`,
-                    amount: req.body.amount,
-                    card_number: card_number,
-                    expiry: req.body.exp,
-                    birth: req.body.dob,
-                    pwd_2digit: pwd_decrypted,
+                    amount: custom_data.amount * custom_data.quantity,
+                    card_number: user_data.card_number,
+                    pwd_2digit: user_data.pwd_2digit,
+                    expiry: user_data.expiry,
+                    birth: user_data.birth,
+                    buyer_name: user_data.buyer_name,
+                    buyer_tel: user_data.buyer_tel,
+                    buyer_email: user_data.buyer_email,
+                    buyer_addr: user_data.buyer_addr,
+                    buyer_postcode: user_data.buyer_postcode,
                     custom_data: JSON.stringify(custom_data),
-                    buyer_name: req.body.name,
-                    buyer_tel: req.body.phone,
-                    buyer_email: req.body.email,
-                    buyer_addr: req.body.address,
-                    buyer_postcode: req.body.zip,
-                };
-                return this.iamport.subscribe.onetime(params);
+                });
             })
             // Process response
             .then((iamport_result) => {
@@ -1176,63 +1185,57 @@ class IamportService {
                     success: true,
                     message: 'Payment successful',
                 });
+                setTimeout(this.mcPaymentHook, 0, iamport_result);
             })
             .catch((err) => {
+                logger.error(err.message);
                 const error = {
+                    success: false,
                     params: custom_data,
                     error: {
                         code: err.code || 'mc_pay_error',
                         message: err.message,
                     },
                 };
-                logger.error(error);
-                error.success = false;
                 res.send(error);
             });
     }
 
-    mcPaymentHook(req) {
+    mcPaymentHook(mc_iamport_result) {
         // Ditch non-MC notifications
-        if (req.body.merchant_uid.substring(0, 3) !== 'mc_') { return; }
-        // Fetch the transaction
-        const params = { imp_uid: req.body.imp_uid };
-        this.iamport.payment.getByImpUid(params)
-            .then((mc_iamport_result) => {
-                const custom_data = JSON.parse(mc_iamport_result.custom_data);
-                const type = payment_type[custom_data.type];
-                const status = status_type[mc_iamport_result.status];
-                if (type === payment_type.mc_purchase && status === status_type.paid) {
-                    // Insert payment result to db
-                    mongoDB.getDB().collection('mc-transactions').insertOne({
-                        business_id: custom_data.business_id,
-                        merchant_uid: mc_iamport_result.merchant_uid,
-                        mc_customer_id: custom_data.mc_customer_id,
-                        type: type,
-                        name: custom_data.name,
-                        promotable_name: custom_data.promotable_name,
-                        currency: mc_iamport_result.currency,
-                        amount: mc_iamport_result.amount,
-                        perc_disc_applied: custom_data.perc_disc_applied,
-                        pay_method: mc_iamport_result.pay_method,
-                        card_name: mc_iamport_result.card_name,
-                        status: status,
-                        receipt_url: mc_iamport_result.receipt_url,
-                        time_paid: moment(mc_iamport_result.paid_at * 1000).toDate(),
-                        time_created: new Date(),
-                    });
-                }
-            })
-            .catch((iamport_error) => {
-                const error = {
-                    message: 'Look up by \'imp_uid\' failed.',
-                    params: params,
-                    error: {
-                        code: iamport_error.code,
-                        message: iamport_error.message,
-                    },
-                };
-                logger.error(error);
-            });
+        if (mc_iamport_result.merchant_uid.substring(0, 3) !== 'mc_') { return; }
+        const custom_data = JSON.parse(mc_iamport_result.custom_data);
+        const status = status_type[mc_iamport_result.status];
+        if (status === status_type.paid) {
+            const transactions = [];
+            for (let i = 0; i < custom_data.quantity; i += 1) {
+                transactions.push({
+                    business_id: custom_data.business_id,
+                    mc_customer_id: custom_data.mc_customer_id,
+                    promotable_id: custom_data.promotable_id,
+                    promotable_name: custom_data.promotable_name,
+                    merchant_uid: mc_iamport_result.merchant_uid,
+                    type: custom_data.type,
+                    name: custom_data.name,
+                    currency: mc_iamport_result.currency,
+                    amount: custom_data.amount,
+                    perc_disc_applied: custom_data.perc_disc_applied,
+                    pay_method: mc_iamport_result.pay_method,
+                    card_name: mc_iamport_result.card_name,
+                    status: status,
+                    receipt_url: mc_iamport_result.receipt_url,
+                    time_created: new Date(),
+                });
+            }
+            // Insert payment result to db
+            mongoDB.getDB().collection('mc-transactions').insertMany(transactions)
+                .then((insert_result) => {
+                    logger.debug(`Menucast purchase (${transactions.length} transactions) successfully saved to DB`);
+                })
+                .catch((err) => {
+                    logger.error(err.message);
+                });
+        }
     }
 
     /**
@@ -1248,13 +1251,13 @@ class IamportService {
                 long_kr: `[환불] ${params.long_kr}`,
             };
         }
-        const business_id = params.business_id;
+        const business_id = params.business_id.substring(params.business_id.length - 6);
         if (params.type === payment_type.mc_purchase) {
-            const promotable_id = params.promotable_id;
+            const promotable_name = params.promotable_name;
             return {
-                short: `MC#${business_id}=${promotable_id}`,
-                long: `Menucast purchase [#${business_id}] - ${promotable_id}`,
-                long_kr: `메뉴캐스트 결제 [#${business_id}] - ${promotable_id}`,
+                short: `MC#${business_id}=${promotable_name}`,
+                long: `Menucast purchase [#${business_id}] - ${promotable_name}`,
+                long_kr: `메뉴캐스트 결제 [#${business_id}] - ${promotable_name}`,
             };
         }
         const billing_plan = params.billing_plan;
