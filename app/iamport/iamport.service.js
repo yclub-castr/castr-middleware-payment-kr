@@ -1139,7 +1139,7 @@ class IamportService {
                         custom_data.promotable_id = promotable_id;
                         custom_data.promotable_name = promotable.nameOne;
                         custom_data.perc_disc_applied = promotable.discount;
-                        custom_data.amount = (promotable.price * (1 - (promotable.discount / 100))).toFixed(0);
+                        custom_data.amount = parseInt(promotable.price * (1 - (promotable.discount / 100)));
                     }
                 });
                 // Custom data for I'mport
@@ -1207,25 +1207,34 @@ class IamportService {
         const custom_data = JSON.parse(mc_iamport_result.custom_data);
         const status = status_type[mc_iamport_result.status];
         if (status === status_type.paid) {
+            const transactions = [];
+            for (let i = 0; i < custom_data.quantity; i += 1) {
+                transactions.push({
+                    business_id: custom_data.business_id,
+                    mc_customer_id: custom_data.mc_customer_id,
+                    promotable_id: custom_data.promotable_id,
+                    promotable_name: custom_data.promotable_name,
+                    merchant_uid: mc_iamport_result.merchant_uid,
+                    type: custom_data.type,
+                    name: custom_data.name,
+                    currency: mc_iamport_result.currency,
+                    amount: custom_data.amount,
+                    perc_disc_applied: custom_data.perc_disc_applied,
+                    pay_method: mc_iamport_result.pay_method,
+                    card_name: mc_iamport_result.card_name,
+                    status: status,
+                    receipt_url: mc_iamport_result.receipt_url,
+                    time_created: new Date(),
+                });
+            }
             // Insert payment result to db
-            mongoDB.getDB().collection('mc-transactions').insertOne({
-                business_id: custom_data.business_id,
-                mc_customer_id: custom_data.mc_customer_id,
-                promotable_id: custom_data.promotable_id,
-                promotable_name: custom_data.promotable_name,
-                quantity: custom_data.quantity,
-                merchant_uid: mc_iamport_result.merchant_uid,
-                type: custom_data.type,
-                name: custom_data.name,
-                currency: mc_iamport_result.currency,
-                amount: custom_data.amount,
-                perc_disc_applied: custom_data.perc_disc_applied,
-                pay_method: mc_iamport_result.pay_method,
-                card_name: mc_iamport_result.card_name,
-                status: status,
-                receipt_url: mc_iamport_result.receipt_url,
-                time_created: new Date(),
-            });
+            mongoDB.getDB().collection('mc-transactions').insertMany(transactions)
+                .then((insert_result) => {
+                    logger.debug(`Menucast purchase (${transactions.length} transactions) successfully saved to DB`);
+                })
+                .catch((err) => {
+                    logger.error(err.message);
+                });
         }
     }
 

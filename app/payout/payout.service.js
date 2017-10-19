@@ -49,7 +49,6 @@ class PayoutService {
      * Inserts to 'mc-statements' using data from 'mc-transactions'
      */
     _payOut() {
-        logger.debug('Paying out...');
         const today = moment.tz(timezone.kr).day(5).hour(0).minute(0).second(0).millisecond(0);
         const twoWeeksAgo = moment(today).subtract(2, 'week');
         mongoDB.getDB().collection('mc-transactions').aggregate(
@@ -72,6 +71,8 @@ class PayoutService {
                 }
             ],
             (db_error, statements) => {
+                if (statements.length === 0) { return; }
+                logger.debug('Paying out...');
                 statements.forEach((statement) => {
                     statement.business_id = statement._id;
                     statement.date_range = {
@@ -88,6 +89,9 @@ class PayoutService {
                     .then(() => {
                         const msg = `Paid out to ${statements.length} businesses.`;
                         logger.debug(msg);
+                    })
+                    .catch((err) => {
+                        logger.error(err.message);
                     });
             }
         );
@@ -110,10 +114,10 @@ class PayoutService {
                 const statements = [];
                 cursor.sort({ time_created: -1 }).forEach(
                     // Iteration callback
-                    (statement) => { 
+                    (statement) => {
                         statement.date_range.start = moment(statement.date_range.start).tz(timezone.kr).locale('kr').format('LL');
                         statement.date_range.end = moment(statement.date_range.end).tz(timezone.kr).locale('kr').format('LL');
-                        statements.push(statement); 
+                        statements.push(statement);
                     },
                     // End callback
                     (end) => {
@@ -152,7 +156,7 @@ class PayoutService {
                         const purchases = [];
                         cursor.sort({ time_created: -1 }).forEach(
                             // Iteration callback
-                            (document) => { 
+                            (document) => {
                                 const transaction = {
                                     date: moment(document.time_created).tz(timezone.kr).locale('kr').format('LL'),
                                     description: document.promotable_name,
@@ -160,7 +164,7 @@ class PayoutService {
                                     type: document.type,
                                     status: document.status,
                                 };
-                                purchases.push(transaction); 
+                                purchases.push(transaction);
                             },
                             // End callback
                             (end) => {
