@@ -105,7 +105,7 @@ class IamportService {
             }
         );
         // Schdule payment-schedule check at next 6AM
-        this.checkScheduleAt6AM();
+        this._checkScheduleAt6AM();
     }
 
     /**
