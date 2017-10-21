@@ -6,7 +6,7 @@ const mongoDB = require('../db');
 const constants = require('../constants');
 const logger = require('../utils').logger();
 const moment = require('../utils').moment();
-const crypto2 = require('crypto2');
+const NodeRSA = require('node-rsa');
 const shortid = require('shortid');
 const Iamport = require('iamport');
 
@@ -275,7 +275,7 @@ class IamportService {
         const business_id = req.params.business_id;
         let customer_uid;
         let is_default;
-        this._rsaDecrypt(req.body.payload)
+        this._rsaDecryptArray(req.body.payload)
             .then((payload) => {
                 const body = JSON.parse(payload);
                 const card_number = body.card_number;
@@ -1116,7 +1116,7 @@ class IamportService {
         const mc_customer_id = req.body.mc_customer_id;
         const custom_data = {};
         const user_data = {};
-        this._rsaDecrypt(req.body.payload)
+        this._rsaDecryptArray(req.body.payload)
             .then((payload) => {
                 const body = JSON.parse(payload);
                 custom_data.quantity = body.qty;
@@ -1271,12 +1271,30 @@ class IamportService {
         };
     }
 
-    _rsaDecrypt(encrypted) {
+    _rsaDecryptArray(encryption_array) {
+        return new Promise(async (resolve, reject) => {
+            const decoder = new NodeRSA(process.env.RSA_PRIV_KEY);
+            decoder.setOptions({ encryptionScheme: 'pkcs1' });
+            let decrypted = '';
+            try {
+                for (let i = 0; i < encryption_array.length; i += 1) {
+                    decrypted += await this._rsaDecrypt(decoder, encryption_array[i]);
+                }
+                resolve(decrypted);
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
+
+    _rsaDecrypt(decoder, encrypted) {
         return new Promise((resolve, reject) => {
-            crypto2.decrypt.rsa(encrypted, process.env.RSA_PRIV_KEY, (err, decrypted) => {
-                if (err) { return reject(err); }
-                return resolve(decrypted);
-            });
+            try {
+                const decrypted = decoder.decrypt(encrypted, 'utf8');
+                resolve(decrypted);
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 }
