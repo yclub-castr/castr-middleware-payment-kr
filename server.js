@@ -20,7 +20,8 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cors());
 
-mongoDB.connect((err) => {
+mongoDB.connect((db_error) => {
+    // Log incoming requests
     app.use((req, res, next) => {
         logger.debug('# INCOMING REQUEST');
         logger.debug(`# ${req.method} ${req.originalUrl}`);
