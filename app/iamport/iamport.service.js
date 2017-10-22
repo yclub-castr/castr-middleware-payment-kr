@@ -1272,7 +1272,7 @@ class IamportService {
     }
 
     _rsaDecryptArray(encryption_array) {
-        return new Promise(async function (resolve, reject) {
+        return new Promise(async (resolve, reject) => {
             const decoder = new NodeRSA(process.env.RSA_PRIV_KEY);
             decoder.setOptions({ encryptionScheme: 'pkcs1' });
             let decrypted = '';
