@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const mongoDB = require('./app/db');
 const logger = require('./app/utils').logger();
 const routes = require('./app/routes');
@@ -17,8 +18,15 @@ const port = process.env.PORT;
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+app.use(cors());
 
 mongoDB.connect((err) => {
+    app.use((req, res, next) => {
+        logger.debug('# INCOMING REQUEST');
+        logger.debug(`# ${req.method} ${req.originalUrl}`);
+        next();
+    });
+
     app.use('/', routes);
 
     iamportService.initialize();
