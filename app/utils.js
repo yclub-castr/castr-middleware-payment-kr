@@ -49,9 +49,34 @@ const transporter = nodemailer.createTransport({
     },
 });
 
+// Winston PaperTrail - logger
+const winston = require('winston');
+require('winston-papertrail').Papertrail;
+const host = 'logs6.papertrailapp.com';
+const port = 42065;
+
+const nodeWinstonPapertrail = new winston.transports.Papertrail({
+    host: host,
+    port: port,
+    program: 'API',
+    colorize: true,
+    logFormat: function (level, message) {
+        return message;
+    },
+});
+
+const nodeLogger = new winston.Logger({
+    transports: [nodeWinstonPapertrail]
+});
+
 module.exports = {
     logger() {
-        return logger;
+        if (process.env.ENVIRONMENT === 'AWS-DEV') {
+            return nodeLogger;
+        } else if (process.env.ENVIRONMENT === 'DEV') {
+            return logger;
+        }
+        return nodeLogger;
     },
     moment() {
         return moment;
