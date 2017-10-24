@@ -51,7 +51,8 @@ const transporter = nodemailer.createTransport({
 
 // Winston PaperTrail - logger
 const winston = require('winston');
-require('winston-papertrail').Papertrail;
+require('winston-papertrail').Papertrail; // eslint-disable-line no-unused-expressions
+
 const host = 'logs6.papertrailapp.com';
 const port = 42065;
 
@@ -66,7 +67,7 @@ const nodeWinstonPapertrail = new winston.transports.Papertrail({
 });
 
 const nodeLogger = new winston.Logger({
-    transports: [nodeWinstonPapertrail]
+    transports: [nodeWinstonPapertrail],
 });
 
 module.exports = {
